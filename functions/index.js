@@ -775,7 +775,7 @@ async function checkSingleService(service, previousStatus = null) {
 // - 200K CPU-seconds/month (estimated ~86K/month = 43% usage)
 exports.scheduledHealthCheck = functions
     .pubsub
-    .schedule("every 60 seconds")
+    .schedule("*/1 * * * *")  // Every 1 minute (cron format)
     .timeZone("UTC")
     .onRun(async (context) => {
       const startExecutionTime = Date.now();
