@@ -222,12 +222,14 @@ class ServiceStatusProvider with ChangeNotifier {
         name: 'Firebase',
         url: 'https://status.firebase.google.com/',
         type: ServiceType.thirdParty,
+        components: ServiceComponentDefinitions.getComponentsForService('firebase'),
       ),
       ServiceStatus.initial(
         id: 'google',
         name: 'Google Services',
         url: 'https://www.google.com/appsstatus/dashboard/',
         type: ServiceType.thirdParty,
+        components: ServiceComponentDefinitions.getComponentsForService('google'),
       ),
       ServiceStatus.initial(
         id: 'apple',

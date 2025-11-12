@@ -20,7 +20,7 @@ service cloud.firestore {
       // Allow anyone to write service status (any user can update status after health check)
       // No authentication required - enables real-time status sharing
       // Validate required fields exist and are correct types
-      // Optional fields (lastUpTime, errorMessage) can be null
+      // Optional fields (lastUpTime, errorMessage, components) can be null
       allow create, update: if request.resource.data.keys().hasAll(['id', 'name', 'url', 'type', 'status', 'lastChecked', 'responseTimeMs', 'consecutiveFailures'])
                            && request.resource.data.id is string
                            && request.resource.data.name is string
@@ -31,7 +31,8 @@ service cloud.firestore {
                            && request.resource.data.responseTimeMs is int
                            && request.resource.data.consecutiveFailures is int
                            && (request.resource.data.lastUpTime == null || request.resource.data.lastUpTime is timestamp)
-                           && (request.resource.data.errorMessage == null || request.resource.data.errorMessage is string);
+                           && (request.resource.data.errorMessage == null || request.resource.data.errorMessage is string)
+                           && (request.resource.data.components == null || request.resource.data.components is list);
       
       // Allow delete only for cleanup (optional)
       allow delete: if false;

@@ -50,6 +50,7 @@ class ServiceComponentDefinitions {
   // Gets components for a specific service
   // [serviceId] - The service ID to get components for
   // Returns list of ServiceComponent definitions
+
   static List<ServiceComponent> getComponentsForService(String serviceId) {
     switch (serviceId) {
       case 'infinitum-view':
@@ -114,6 +115,116 @@ class ServiceComponentDefinitions {
             name: 'Auth',
             url: 'https://infinitum-onboarding.web.app/auth',
             type: ComponentType.auth,
+          ),
+        ];
+      
+      case 'google':
+        return [
+          ServiceComponent.initial(
+            id: 'google-apps-script',
+            name: 'Apps Script',
+            url: 'https://www.google.com/appsstatus/dashboard/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'google-appsheet',
+            name: 'AppSheet',
+            url: 'https://www.google.com/appsstatus/dashboard/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'google-gmail',
+            name: 'Gmail',
+            url: 'https://www.google.com/appsstatus/dashboard/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'google-calendar',
+            name: 'Google Calendar',
+            url: 'https://www.google.com/appsstatus/dashboard/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'google-docs',
+            name: 'Google Docs',
+            url: 'https://www.google.com/appsstatus/dashboard/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'google-drive',
+            name: 'Google Drive',
+            url: 'https://www.google.com/appsstatus/dashboard/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'google-forms',
+            name: 'Google Forms',
+            url: 'https://www.google.com/appsstatus/dashboard/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'google-sheets',
+            name: 'Google Sheets',
+            url: 'https://www.google.com/appsstatus/dashboard/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'google-slides',
+            name: 'Google Slides',
+            url: 'https://www.google.com/appsstatus/dashboard/',
+            type: ComponentType.other,
+          ),
+        ];
+      
+      case 'firebase':
+        return [
+          ServiceComponent.initial(
+            id: 'firebase-app-hosting',
+            name: 'App Hosting',
+            url: 'https://status.firebase.google.com/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'firebase-authentication',
+            name: 'Authentication',
+            url: 'https://status.firebase.google.com/',
+            type: ComponentType.auth,
+          ),
+          ServiceComponent.initial(
+            id: 'firebase-cloud-messaging',
+            name: 'Cloud Messaging',
+            url: 'https://status.firebase.google.com/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'firebase-console',
+            name: 'Console',
+            url: 'https://status.firebase.google.com/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'firebase-crashlytics',
+            name: 'Crashlytics',
+            url: 'https://status.firebase.google.com/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'firebase-hosting',
+            name: 'Hosting',
+            url: 'https://status.firebase.google.com/',
+            type: ComponentType.cdn,
+          ),
+          ServiceComponent.initial(
+            id: 'firebase-performance-monitoring',
+            name: 'Performance Monitoring',
+            url: 'https://status.firebase.google.com/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'firebase-realtime-database',
+            name: 'Realtime Database',
+            url: 'https://status.firebase.google.com/',
+            type: ComponentType.database,
           ),
         ];
       

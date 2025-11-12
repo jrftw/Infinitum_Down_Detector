@@ -234,6 +234,39 @@ exports.checkMultipleServices =
     };
   });
 
+// MARK: - Component Definitions
+// Defines components for services that have sub-components
+// Matches client-side definitions in config.dart
+function getComponentsForService(serviceId) {
+  switch (serviceId) {
+    case "google":
+      return [
+        {id: "google-apps-script", name: "Apps Script", url: "https://www.google.com/appsstatus/dashboard/", type: "other"},
+        {id: "google-appsheet", name: "AppSheet", url: "https://www.google.com/appsstatus/dashboard/", type: "other"},
+        {id: "google-gmail", name: "Gmail", url: "https://www.google.com/appsstatus/dashboard/", type: "other"},
+        {id: "google-calendar", name: "Google Calendar", url: "https://www.google.com/appsstatus/dashboard/", type: "other"},
+        {id: "google-docs", name: "Google Docs", url: "https://www.google.com/appsstatus/dashboard/", type: "other"},
+        {id: "google-drive", name: "Google Drive", url: "https://www.google.com/appsstatus/dashboard/", type: "other"},
+        {id: "google-forms", name: "Google Forms", url: "https://www.google.com/appsstatus/dashboard/", type: "other"},
+        {id: "google-sheets", name: "Google Sheets", url: "https://www.google.com/appsstatus/dashboard/", type: "other"},
+        {id: "google-slides", name: "Google Slides", url: "https://www.google.com/appsstatus/dashboard/", type: "other"},
+      ];
+    case "firebase":
+      return [
+        {id: "firebase-app-hosting", name: "App Hosting", url: "https://status.firebase.google.com/", type: "other"},
+        {id: "firebase-authentication", name: "Authentication", url: "https://status.firebase.google.com/", type: "auth"},
+        {id: "firebase-cloud-messaging", name: "Cloud Messaging", url: "https://status.firebase.google.com/", type: "other"},
+        {id: "firebase-console", name: "Console", url: "https://status.firebase.google.com/", type: "other"},
+        {id: "firebase-crashlytics", name: "Crashlytics", url: "https://status.firebase.google.com/", type: "other"},
+        {id: "firebase-hosting", name: "Hosting", url: "https://status.firebase.google.com/", type: "cdn"},
+        {id: "firebase-performance-monitoring", name: "Performance Monitoring", url: "https://status.firebase.google.com/", type: "other"},
+        {id: "firebase-realtime-database", name: "Realtime Database", url: "https://status.firebase.google.com/", type: "database"},
+      ];
+    default:
+      return [];
+  }
+}
+
 // MARK: - Service Definitions
 // Defines all services to monitor (matches client-side definitions)
 const INFINITUM_SERVICES = [
@@ -319,6 +352,190 @@ const THIRD_PARTY_SERVICES = [
     type: "thirdParty",
   },
 ];
+
+// MARK: - Component Status Parsing
+/**
+ * Parses component statuses from status page HTML/JSON
+ * @param {string} serviceId - Service ID (google, firebase, etc.)
+ * @param {Array} components - Array of component definitions
+ * @param {string} responseBody - HTML/JSON response body from status page
+ * @param {number} httpStatus - HTTP status code
+ * @return {Promise<Array>} Array of component status objects
+ */
+async function parseComponentStatuses(serviceId, components, responseBody, httpStatus) {
+  const componentStatuses = [];
+  const responseBodyLower = responseBody.toLowerCase();
+  
+  // If HTTP status indicates page is down, mark all components as down
+  if (httpStatus >= 500) {
+    return components.map((comp) => ({
+      id: comp.id,
+      name: comp.name,
+      url: comp.url,
+      type: comp.type,
+      status: "down",
+      lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+      responseTimeMs: 0,
+      errorMessage: `HTTP ${httpStatus}`,
+    }));
+  }
+  
+  // Service-specific parsing
+  if (serviceId === "google") {
+    // Parse Google Workspace status page
+    // Google status page typically has service names in the HTML
+    // We'll search for service names and check for status indicators
+    for (const comp of components) {
+      let compStatus = "unknown";
+      let errorMessage = null;
+      
+      // Search for the component name in the response
+      const compNameLower = comp.name.toLowerCase();
+      const searchPatterns = [
+        compNameLower,
+        compNameLower.replace("google ", ""),
+        compNameLower.replace("google", "").trim(),
+      ];
+      
+      // Check if component name appears in the page
+      const foundInPage = searchPatterns.some((pattern) =>
+        responseBodyLower.includes(pattern),
+      );
+      
+      if (foundInPage) {
+        // Look for status indicators near the component name
+        // Common patterns: "operational", "service disruption", "outage", "degraded"
+        const compIndex = responseBodyLower.indexOf(compNameLower);
+        if (compIndex !== -1) {
+          // Check surrounding text for status indicators
+          const surroundingText = responseBodyLower.substring(
+            Math.max(0, compIndex - 200),
+            Math.min(responseBody.length, compIndex + 200),
+          );
+          
+          if (
+            surroundingText.includes("service disruption") ||
+            surroundingText.includes("outage") ||
+            surroundingText.includes("down")
+          ) {
+            compStatus = "down";
+            errorMessage = "Service disruption reported";
+          } else if (
+            surroundingText.includes("degraded") ||
+            surroundingText.includes("partial") ||
+            surroundingText.includes("issue")
+          ) {
+            compStatus = "degraded";
+            errorMessage = "Service degradation reported";
+          } else if (
+            surroundingText.includes("operational") ||
+            surroundingText.includes("normal") ||
+            surroundingText.includes("available")
+          ) {
+            compStatus = "operational";
+          }
+        }
+      }
+      
+      // If we found the component but couldn't determine status, default to operational
+      // (since the page loaded successfully)
+      if (foundInPage && compStatus === "unknown") {
+        compStatus = "operational";
+      }
+      
+      componentStatuses.push({
+        id: comp.id,
+        name: comp.name,
+        url: comp.url,
+        type: comp.type,
+        status: compStatus,
+        lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+        responseTimeMs: 0,
+        errorMessage: errorMessage,
+      });
+    }
+  } else if (serviceId === "firebase") {
+    // Parse Firebase status page
+    // Firebase status page has similar structure
+    for (const comp of components) {
+      let compStatus = "unknown";
+      let errorMessage = null;
+      
+      const compNameLower = comp.name.toLowerCase();
+      const searchPatterns = [
+        compNameLower,
+        compNameLower.replace("firebase ", ""),
+        compNameLower.replace("firebase", "").trim(),
+      ];
+      
+      const foundInPage = searchPatterns.some((pattern) =>
+        responseBodyLower.includes(pattern),
+      );
+      
+      if (foundInPage) {
+        const compIndex = responseBodyLower.indexOf(compNameLower);
+        if (compIndex !== -1) {
+          const surroundingText = responseBodyLower.substring(
+            Math.max(0, compIndex - 200),
+            Math.min(responseBody.length, compIndex + 200),
+          );
+          
+          if (
+            surroundingText.includes("service disruption") ||
+            surroundingText.includes("outage") ||
+            surroundingText.includes("down") ||
+            surroundingText.includes("incident")
+          ) {
+            compStatus = "down";
+            errorMessage = "Service disruption reported";
+          } else if (
+            surroundingText.includes("degraded") ||
+            surroundingText.includes("partial") ||
+            surroundingText.includes("issue")
+          ) {
+            compStatus = "degraded";
+            errorMessage = "Service degradation reported";
+          } else if (
+            surroundingText.includes("operational") ||
+            surroundingText.includes("normal") ||
+            surroundingText.includes("available") ||
+            surroundingText.includes("healthy")
+          ) {
+            compStatus = "operational";
+          }
+        }
+      }
+      
+      if (foundInPage && compStatus === "unknown") {
+        compStatus = "operational";
+      }
+      
+      componentStatuses.push({
+        id: comp.id,
+        name: comp.name,
+        url: comp.url,
+        type: comp.type,
+        status: compStatus,
+        lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+        responseTimeMs: 0,
+        errorMessage: errorMessage,
+      });
+    }
+  } else {
+    // For other services, default to unknown
+    componentStatuses = components.map((comp) => ({
+      id: comp.id,
+      name: comp.name,
+      url: comp.url,
+      type: comp.type,
+      status: "unknown",
+      lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+      responseTimeMs: 0,
+    }));
+  }
+  
+  return componentStatuses;
+}
 
 // MARK: - Helper Function: Check Single Service
 /**
@@ -421,6 +638,45 @@ async function checkSingleService(service, previousStatus = null) {
       lastUpTime = previousStatus?.lastUpTime || null;
     }
 
+    // Get components for this service
+    const components = getComponentsForService(service.id);
+    
+    // Parse component statuses from status page if available
+    let componentStatuses = [];
+    if (components.length > 0 && responseBody) {
+      try {
+        componentStatuses = await parseComponentStatuses(
+          service.id,
+          components,
+          responseBody,
+          response.status,
+        );
+      } catch (e) {
+        console.warn(`Error parsing component statuses for ${service.id}:`, e.message);
+        // Fall back to unknown status if parsing fails
+        componentStatuses = components.map((comp) => ({
+          id: comp.id,
+          name: comp.name,
+          url: comp.url,
+          type: comp.type,
+          status: "unknown",
+          lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+          responseTimeMs: 0,
+        }));
+      }
+    } else {
+      // No components or no response body
+      componentStatuses = components.map((comp) => ({
+        id: comp.id,
+        name: comp.name,
+        url: comp.url,
+        type: comp.type,
+        status: "unknown",
+        lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+        responseTimeMs: 0,
+      }));
+    }
+
     return {
       id: service.id,
       name: service.name,
@@ -433,6 +689,7 @@ async function checkSingleService(service, previousStatus = null) {
       lastChecked: admin.firestore.FieldValue.serverTimestamp(),
       lastUpTime: lastUpTime,
       consecutiveFailures: consecutiveFailures,
+      components: componentStatuses,
     };
   } catch (error) {
     const endTime = Date.now();
@@ -460,6 +717,38 @@ async function checkSingleService(service, previousStatus = null) {
     // Preserve lastUpTime from previous status if available
     const lastUpTime = previousStatus?.lastUpTime || null;
 
+    // Get components for this service
+    const components = getComponentsForService(service.id);
+    
+    // Parse component statuses (will default to unknown if parsing fails)
+    let componentStatuses = [];
+    if (components.length > 0) {
+      try {
+        // For error cases, we don't have responseBody, so mark all as down
+        componentStatuses = components.map((comp) => ({
+          id: comp.id,
+          name: comp.name,
+          url: comp.url,
+          type: comp.type,
+          status: "down",
+          lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+          responseTimeMs: 0,
+          errorMessage: errorMessage || "Service unavailable",
+        }));
+      } catch (e) {
+        console.warn(`Error creating component statuses for ${service.id}:`, e.message);
+        componentStatuses = components.map((comp) => ({
+          id: comp.id,
+          name: comp.name,
+          url: comp.url,
+          type: comp.type,
+          status: "unknown",
+          lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+          responseTimeMs: 0,
+        }));
+      }
+    }
+
     return {
       id: service.id,
       name: service.name,
@@ -472,6 +761,7 @@ async function checkSingleService(service, previousStatus = null) {
       lastChecked: admin.firestore.FieldValue.serverTimestamp(),
       lastUpTime: lastUpTime,
       consecutiveFailures: consecutiveFailures,
+      components: componentStatuses,
     };
   }
 }

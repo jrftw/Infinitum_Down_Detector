@@ -2,12 +2,13 @@
 // Purpose: Service for caching service status in Firestore for shared access across users
 // Author: Kevin Doyle Jr. / Infinitum Imagery LLC
 // Last Modified: 2025-01-27
-// Dependencies: cloud_firestore, models/service_status.dart, core/logger.dart
+// Dependencies: cloud_firestore, models/service_status.dart, models/service_component.dart, core/config.dart, core/logger.dart
 // Platform Compatibility: Web, iOS, Android
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart' as firestore;
 import '../models/service_status.dart';
+import '../models/service_component.dart';
 import '../core/logger.dart';
 import '../core/config.dart';
 
@@ -264,6 +265,7 @@ class StatusCacheService {
       'responseTimeMs': service.responseTimeMs,
       'errorMessage': service.errorMessage,
       'consecutiveFailures': service.consecutiveFailures,
+      'components': service.components.map((comp) => _serviceComponentToMap(comp)).toList(),
     };
   }
   
@@ -272,6 +274,24 @@ class StatusCacheService {
   /// [data] - Map data from Firestore
   /// Returns ServiceStatus object
   ServiceStatus _mapToServiceStatus(String id, Map<String, dynamic> data) {
+    // Parse components if present, otherwise get from config
+    List<ServiceComponent> components = [];
+    if (data['components'] != null && data['components'] is List) {
+      try {
+        components = (data['components'] as List)
+            .map((compData) => _mapToServiceComponent(compData as Map<String, dynamic>))
+            .toList();
+      } catch (e) {
+        Logger.logWarning('Error parsing components for service $id: $e', 
+            'status_cache_service.dart', '_mapToServiceStatus');
+        // Fall back to config if parsing fails
+        components = ServiceComponentDefinitions.getComponentsForService(id);
+      }
+    } else {
+      // If no components in Firestore, get from config
+      components = ServiceComponentDefinitions.getComponentsForService(id);
+    }
+    
     return ServiceStatus(
       id: data['id'] as String? ?? id,
       name: data['name'] as String? ?? 'Unknown',
@@ -283,7 +303,65 @@ class StatusCacheService {
       responseTimeMs: data['responseTimeMs'] as int? ?? 0,
       errorMessage: data['errorMessage'] as String?,
       consecutiveFailures: data['consecutiveFailures'] as int? ?? 0,
+      components: components,
     );
+  }
+  
+  /// Converts ServiceComponent to Map for Firestore storage
+  /// [component] - ServiceComponent to convert
+  /// Returns Map representation
+  Map<String, dynamic> _serviceComponentToMap(ServiceComponent component) {
+    return {
+      'id': component.id,
+      'name': component.name,
+      'url': component.url,
+      'type': component.type.name,
+      'status': component.status.name,
+      'lastChecked': firestore.Timestamp.fromDate(component.lastChecked),
+      'responseTimeMs': component.responseTimeMs,
+      'errorMessage': component.errorMessage,
+      'statusCode': component.statusCode,
+    };
+  }
+  
+  /// Converts Map from Firestore to ServiceComponent
+  /// [data] - Map data from Firestore
+  /// Returns ServiceComponent object
+  ServiceComponent _mapToServiceComponent(Map<String, dynamic> data) {
+    return ServiceComponent(
+      id: data['id'] as String? ?? '',
+      name: data['name'] as String? ?? 'Unknown',
+      url: data['url'] as String? ?? '',
+      type: _parseComponentType(data['type'] as String?),
+      status: _parseServiceHealthStatus(data['status'] as String?),
+      lastChecked: (data['lastChecked'] as firestore.Timestamp?)?.toDate() ?? DateTime.now(),
+      responseTimeMs: data['responseTimeMs'] as int? ?? 0,
+      errorMessage: data['errorMessage'] as String?,
+      statusCode: data['statusCode'] as int?,
+    );
+  }
+  
+  /// Parses ComponentType from string
+  /// [typeString] - String representation of ComponentType
+  /// Returns ComponentType enum value
+  ComponentType _parseComponentType(String? typeString) {
+    if (typeString == null) return ComponentType.other;
+    
+    switch (typeString.toLowerCase()) {
+      case 'main':
+        return ComponentType.main;
+      case 'auth':
+        return ComponentType.auth;
+      case 'api':
+        return ComponentType.api;
+      case 'database':
+        return ComponentType.database;
+      case 'cdn':
+        return ComponentType.cdn;
+      case 'other':
+      default:
+        return ComponentType.other;
+    }
   }
   
   /// Parses ServiceType from string
