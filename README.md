@@ -20,8 +20,7 @@ A comprehensive, free, and publicly accessible down detector application built w
 - Main Website (infinitumlive.com)
 - Infinitum CRM (crm.infinitumlive.com)
 - Onboarding (infinitum-onboarding.web.app)
-- InfiniBoard (iboard.duckdns.org)
-- InfiniBoard 2 (iboard2--infinitum-dashboard.us-east4.hosted.app)
+- InfiniBoard (iboard2--infinitum-dashboard.us-east4.hosted.app)
 - Infinitum Imagery (infinitumimagery.com)
 
 ### Third-Party Services

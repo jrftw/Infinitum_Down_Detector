@@ -261,7 +261,6 @@ const String CORS_PROXY_FALLBACK_URL = 'https://corsproxy.io/?';
 const Set<String> HIDDEN_URL_SERVICE_IDS = {
   'infinitum-crm',
   'infinitum-board',
-  'infinitum-board-2',
 };
 
 /// Checks if a service's URL should be hidden from public display

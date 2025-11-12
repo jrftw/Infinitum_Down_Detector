@@ -297,12 +297,6 @@ const INFINITUM_SERVICES = [
   {
     id: "infinitum-board",
     name: "InfiniBoard",
-    url: "https://iboard.duckdns.org/",
-    type: "infinitum",
-  },
-  {
-    id: "infinitum-board-2",
-    name: "InfiniBoard 2",
     url: "https://iboard2--infinitum-dashboard.us-east4.hosted.app/",
     type: "infinitum",
   },
@@ -368,13 +362,14 @@ async function parseComponentStatuses(serviceId, components, responseBody, httpS
   
   // If HTTP status indicates page is down, mark all components as down
   if (httpStatus >= 500) {
+    const now = admin.firestore.Timestamp.now();
     return components.map((comp) => ({
       id: comp.id,
       name: comp.name,
       url: comp.url,
       type: comp.type,
       status: "down",
-      lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+      lastChecked: now,
       responseTimeMs: 0,
       errorMessage: `HTTP ${httpStatus}`,
     }));
@@ -449,7 +444,7 @@ async function parseComponentStatuses(serviceId, components, responseBody, httpS
         url: comp.url,
         type: comp.type,
         status: compStatus,
-        lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+        lastChecked: admin.firestore.Timestamp.now(),
         responseTimeMs: 0,
         errorMessage: errorMessage,
       });
@@ -516,20 +511,21 @@ async function parseComponentStatuses(serviceId, components, responseBody, httpS
         url: comp.url,
         type: comp.type,
         status: compStatus,
-        lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+        lastChecked: admin.firestore.Timestamp.now(),
         responseTimeMs: 0,
         errorMessage: errorMessage,
       });
     }
   } else {
     // For other services, default to unknown
+    const now = admin.firestore.Timestamp.now();
     componentStatuses = components.map((comp) => ({
       id: comp.id,
       name: comp.name,
       url: comp.url,
       type: comp.type,
       status: "unknown",
-      lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+      lastChecked: now,
       responseTimeMs: 0,
     }));
   }
@@ -654,25 +650,27 @@ async function checkSingleService(service, previousStatus = null) {
       } catch (e) {
         console.warn(`Error parsing component statuses for ${service.id}:`, e.message);
         // Fall back to unknown status if parsing fails
+        const now = admin.firestore.Timestamp.now();
         componentStatuses = components.map((comp) => ({
           id: comp.id,
           name: comp.name,
           url: comp.url,
           type: comp.type,
           status: "unknown",
-          lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+          lastChecked: now,
           responseTimeMs: 0,
         }));
       }
     } else {
       // No components or no response body
+      const now = admin.firestore.Timestamp.now();
       componentStatuses = components.map((comp) => ({
         id: comp.id,
         name: comp.name,
         url: comp.url,
         type: comp.type,
         status: "unknown",
-        lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+        lastChecked: now,
         responseTimeMs: 0,
       }));
     }
@@ -725,25 +723,27 @@ async function checkSingleService(service, previousStatus = null) {
     if (components.length > 0) {
       try {
         // For error cases, we don't have responseBody, so mark all as down
+        const now = admin.firestore.Timestamp.now();
         componentStatuses = components.map((comp) => ({
           id: comp.id,
           name: comp.name,
           url: comp.url,
           type: comp.type,
           status: "down",
-          lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+          lastChecked: now,
           responseTimeMs: 0,
           errorMessage: errorMessage || "Service unavailable",
         }));
       } catch (e) {
         console.warn(`Error creating component statuses for ${service.id}:`, e.message);
+        const now = admin.firestore.Timestamp.now();
         componentStatuses = components.map((comp) => ({
           id: comp.id,
           name: comp.name,
           url: comp.url,
           type: comp.type,
           status: "unknown",
-          lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+          lastChecked: now,
           responseTimeMs: 0,
         }));
       }
@@ -792,14 +792,12 @@ exports.scheduledHealthCheck = functions
 
         try {
           const previousDocs = await db.collection(collectionName)
-              .where(
-                  admin.firestore.FieldPath.documentId,
-                  "!=",
-                  lastUpdateDocId,
-              )
               .get();
 
           for (const doc of previousDocs.docs) {
+            // Skip the last_update document
+            if (doc.id === lastUpdateDocId) continue;
+            
             const data = doc.data();
             previousStatuses.set(doc.id, {
               status: data.status,

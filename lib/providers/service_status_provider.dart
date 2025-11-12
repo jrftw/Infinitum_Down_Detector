@@ -199,12 +199,6 @@ class ServiceStatusProvider with ChangeNotifier {
       ServiceStatus.initial(
         id: 'infinitum-board',
         name: 'InfiniBoard',
-        url: 'https://iboard.duckdns.org/',
-        type: ServiceType.infinitum,
-      ),
-      ServiceStatus.initial(
-        id: 'infinitum-board-2',
-        name: 'InfiniBoard 2',
         url: 'https://iboard2--infinitum-dashboard.us-east4.hosted.app/',
         type: ServiceType.infinitum,
       ),
