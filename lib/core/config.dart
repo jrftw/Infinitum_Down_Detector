@@ -1,7 +1,7 @@
 // Filename: config.dart
 // Purpose: Global configuration constants and flags for the application
 // Author: Kevin Doyle Jr. / Infinitum Imagery LLC
-// Last Modified: 2025-01-27
+// Last Modified: 2025-01-30
 // Dependencies: models/service_component.dart
 // Platform Compatibility: Web, iOS, Android
 
@@ -112,9 +112,27 @@ class ServiceComponentDefinitions {
           ),
           ServiceComponent.initial(
             id: 'infinitum-onboarding-auth',
-            name: 'Auth',
+            name: 'Authentication',
             url: 'https://infinitum-onboarding.web.app/auth',
             type: ComponentType.auth,
+          ),
+          ServiceComponent.initial(
+            id: 'infinitum-onboarding-start',
+            name: 'Start Page',
+            url: 'https://infinitum-onboarding.web.app/start',
+            type: ComponentType.main,
+          ),
+          ServiceComponent.initial(
+            id: 'infinitum-onboarding-health',
+            name: 'Health Check',
+            url: 'https://us-central1-infinitum-onboarding.cloudfunctions.net/healthCheck',
+            type: ComponentType.api,
+          ),
+          ServiceComponent.initial(
+            id: 'infinitum-onboarding-openapi',
+            name: 'API Documentation',
+            url: 'https://us-central1-infinitum-onboarding.cloudfunctions.net/openapi',
+            type: ComponentType.api,
           ),
         ];
       
