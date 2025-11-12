@@ -2,14 +2,16 @@
 // Purpose: State management provider for service status monitoring
 // Author: Kevin Doyle Jr. / Infinitum Imagery LLC
 // Last Modified: 2025-01-27
-// Dependencies: flutter, models/service_status.dart, services/health_check_service.dart, services/third_party_status_service.dart, core/config.dart, core/logger.dart
+// Dependencies: flutter, models/service_status.dart, services/health_check_service.dart, services/third_party_status_service.dart, services/status_cache_service.dart, core/config.dart, core/logger.dart
 // Platform Compatibility: Web, iOS, Android
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' as firestore;
 import '../models/service_status.dart';
 import '../services/health_check_service.dart';
 import '../services/third_party_status_service.dart';
+import '../services/status_cache_service.dart';
 import '../core/config.dart';
 import '../core/logger.dart';
 
@@ -18,12 +20,14 @@ import '../core/logger.dart';
 class ServiceStatusProvider with ChangeNotifier {
   final HealthCheckService _healthCheckService;
   final ThirdPartyStatusService _thirdPartyStatusService;
+  final StatusCacheService _cacheService;
   
   List<ServiceStatus> _infinitumServices = [];
   List<ServiceStatus> _thirdPartyServices = [];
   bool _isChecking = false;
   Timer? _periodicCheckTimer;
   DateTime? _lastCheckTime;
+  StreamSubscription<firestore.QuerySnapshot>? _realtimeListener;
   
   // MARK: - Getters
   // Returns list of all Infinitum services
@@ -49,11 +53,114 @@ class ServiceStatusProvider with ChangeNotifier {
   
   // MARK: - Initialization
   // Initializes the provider and sets up initial service list
-  ServiceStatusProvider({HealthCheckService? healthCheckService, ThirdPartyStatusService? thirdPartyStatusService})
-      : _healthCheckService = healthCheckService ?? HealthCheckService(),
-        _thirdPartyStatusService = thirdPartyStatusService ?? ThirdPartyStatusService() {
+  ServiceStatusProvider({
+    HealthCheckService? healthCheckService, 
+    ThirdPartyStatusService? thirdPartyStatusService,
+    StatusCacheService? cacheService,
+  }) : _healthCheckService = healthCheckService ?? HealthCheckService(),
+        _thirdPartyStatusService = thirdPartyStatusService ?? ThirdPartyStatusService(),
+        _cacheService = cacheService ?? StatusCacheService() {
     _initializeServices();
+    _loadFromCache();
+    _setupRealtimeListener();
     Logger.logInfo('ServiceStatusProvider initialized', 'service_status_provider.dart', 'ServiceStatusProvider');
+  }
+  
+  // MARK: - Real-Time Updates
+  /// Sets up real-time listener for service status updates from Firestore
+  /// Returns void
+  void _setupRealtimeListener() {
+    _realtimeListener = _cacheService.listenToServiceUpdates((updatedServices) {
+      if (updatedServices.isEmpty) return;
+      
+      // Create a map of updated services by ID
+      final updatedMap = <String, ServiceStatus>{};
+      for (final service in updatedServices) {
+        updatedMap[service.id] = service;
+      }
+      
+      // Update infinitum services
+      bool infinitumUpdated = false;
+      for (int i = 0; i < _infinitumServices.length; i++) {
+        final updated = updatedMap[_infinitumServices[i].id];
+        if (updated != null) {
+          _infinitumServices[i] = updated;
+          infinitumUpdated = true;
+        }
+      }
+      
+      // Update third-party services
+      bool thirdPartyUpdated = false;
+      for (int i = 0; i < _thirdPartyServices.length; i++) {
+        final updated = updatedMap[_thirdPartyServices[i].id];
+        if (updated != null) {
+          _thirdPartyServices[i] = updated;
+          thirdPartyUpdated = true;
+        }
+      }
+      
+      if (infinitumUpdated || thirdPartyUpdated) {
+        Logger.logDebug('Real-time update received: ${updatedServices.length} services', 
+            'service_status_provider.dart', '_setupRealtimeListener');
+        notifyListeners();
+      }
+    });
+  }
+  
+  // MARK: - Cache Operations
+  /// Loads service statuses from cache
+  /// Returns void
+  Future<void> _loadFromCache() async {
+    try {
+      final cachedServices = await _cacheService.loadServiceStatuses();
+      if (cachedServices.isEmpty) {
+        Logger.logDebug('No cached services found', 'service_status_provider.dart', '_loadFromCache');
+        return;
+      }
+      
+      // Merge cached services with initialized services
+      final cachedMap = <String, ServiceStatus>{};
+      for (final service in cachedServices) {
+        cachedMap[service.id] = service;
+      }
+      
+      // Update infinitum services with cached data
+      _infinitumServices = _infinitumServices.map((service) {
+        final cached = cachedMap[service.id];
+        return cached ?? service;
+      }).toList();
+      
+      // Update third-party services with cached data
+      _thirdPartyServices = _thirdPartyServices.map((service) {
+        final cached = cachedMap[service.id];
+        return cached ?? service;
+      }).toList();
+      
+      // Update last check time from cache
+      final lastUpdate = await _cacheService.getLastUpdateTime();
+      if (lastUpdate != null) {
+        _lastCheckTime = lastUpdate;
+      }
+      
+      notifyListeners();
+      Logger.logInfo('Loaded ${cachedServices.length} services from cache', 
+          'service_status_provider.dart', '_loadFromCache');
+    } catch (e) {
+      Logger.logError('Error loading from cache', 'service_status_provider.dart', '_loadFromCache', e);
+    }
+  }
+  
+  /// Saves service statuses to cache
+  /// Returns void
+  Future<void> _saveToCache() async {
+    try {
+      final allServices = [..._infinitumServices, ..._thirdPartyServices];
+      await _cacheService.saveServiceStatuses(allServices);
+      Logger.logDebug('Saved ${allServices.length} services to cache', 
+          'service_status_provider.dart', '_saveToCache');
+    } catch (e) {
+      Logger.logError('Error saving to cache', 'service_status_provider.dart', '_saveToCache', e);
+    }
   }
   
   // MARK: - Service Initialization
@@ -135,6 +242,12 @@ class ServiceStatusProvider with ChangeNotifier {
         url: 'https://www.tiktok.com/',
         type: ServiceType.thirdParty,
       ),
+      ServiceStatus.initial(
+        id: 'aws',
+        name: 'AWS',
+        url: 'https://status.aws.amazon.com/',
+        type: ServiceType.thirdParty,
+      ),
     ];
     
     Logger.logInfo('Initialized ${_infinitumServices.length} Infinitum services and ${_thirdPartyServices.length} third-party services', 
@@ -165,6 +278,9 @@ class ServiceStatusProvider with ChangeNotifier {
       _thirdPartyServices = thirdPartyResults;
       
       _lastCheckTime = DateTime.now();
+      
+      // Save to cache after successful checks
+      await _saveToCache();
       
       Logger.logInfo('Health checks completed. Operational: $operationalCount, Issues: $issuesCount', 
           'service_status_provider.dart', 'checkAllServices');
@@ -211,6 +327,8 @@ class ServiceStatusProvider with ChangeNotifier {
           updatedService = await _thirdPartyStatusService.checkDiscordStatus();
         } else if (serviceId == 'tiktok') {
           updatedService = await _thirdPartyStatusService.checkTikTokStatus();
+        } else if (serviceId == 'aws') {
+          updatedService = await _thirdPartyStatusService.checkAWSStatus();
         } else {
           return;
         }
@@ -222,6 +340,10 @@ class ServiceStatusProvider with ChangeNotifier {
       }
       
       _lastCheckTime = DateTime.now();
+      
+      // Save to cache after successful check
+      await _saveToCache();
+      
       notifyListeners();
       
     } catch (e) {
@@ -261,8 +383,11 @@ class ServiceStatusProvider with ChangeNotifier {
   @override
   void dispose() {
     stopPeriodicChecks();
+    _realtimeListener?.cancel();
+    _realtimeListener = null;
     _healthCheckService.dispose();
     _thirdPartyStatusService.dispose();
+    _cacheService.dispose();
     Logger.logInfo('ServiceStatusProvider disposed', 'service_status_provider.dart', 'dispose');
     super.dispose();
   }

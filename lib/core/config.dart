@@ -23,6 +23,13 @@ const int MAX_RETRY_ATTEMPTS = 3;
 /// Retry delay in seconds between failed attempts
 const int RETRY_DELAY_SECONDS = 5;
 
+/// Minimum time between Firestore cache writes in seconds (rate limiting)
+/// Set to 30 seconds to prevent excessive writes and stay within free tier
+const int CACHE_WRITE_INTERVAL_SECONDS = 30;
+
+/// Maximum number of cache writes per hour (rate limiting)
+const int MAX_CACHE_WRITES_PER_HOUR = 60;
+
 // MARK: - Service URLs
 // URLs for Infinitum services to monitor
 class ServiceUrls {
@@ -43,12 +50,32 @@ class ThirdPartyServiceUrls {
   static const String appleStatus = 'https://www.apple.com/support/systemstatus/';
   static const String discordStatus = 'https://discordstatus.com/';
   static const String tiktokStatus = 'https://www.tiktok.com/';
+  static const String awsStatus = 'https://status.aws.amazon.com/';
 }
 
 // MARK: - CORS Proxy Configuration
-// CORS proxy URL for web platform requests
-// Using a public CORS proxy service for web compatibility
+// CORS proxy URLs for web platform requests
+// Using public CORS proxy services for web compatibility
+// Primary proxy
 const String CORS_PROXY_URL = 'https://api.allorigins.win/raw?url=';
+// Fallback proxy (if primary fails)
+const String CORS_PROXY_FALLBACK_URL = 'https://corsproxy.io/?';
+
+// MARK: - Service URL Visibility Configuration
+// List of service IDs whose URLs should be hidden from public display
+// These services will still be monitored, but their URLs won't be shown
+const Set<String> HIDDEN_URL_SERVICE_IDS = {
+  'infinitum-crm',
+  'infinitum-board',
+  'infinitum-board-2',
+};
+
+/// Checks if a service's URL should be hidden from public display
+/// [serviceId] - The service ID to check
+/// Returns true if the URL should be hidden, false otherwise
+bool shouldHideServiceUrl(String serviceId) {
+  return HIDDEN_URL_SERVICE_IDS.contains(serviceId);
+}
 
 // Suggestions For Features and Additions Later:
 // - Add environment-specific configurations (dev, staging, prod)

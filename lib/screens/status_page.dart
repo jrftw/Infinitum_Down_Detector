@@ -12,8 +12,10 @@ import '../providers/service_status_provider.dart';
 import '../models/service_status.dart';
 import '../core/logger.dart';
 import '../core/version.dart';
+import '../core/config.dart';
 import '../widgets/service_status_card.dart';
 import '../widgets/report_dialog.dart';
+import '../core/responsive.dart';
 import 'changelog_screen.dart';
 
 // MARK: - Status Page
@@ -26,9 +28,20 @@ class StatusPage extends StatefulWidget {
 }
 
 class _StatusPageState extends State<StatusPage> {
+  final Set<String> _checkingServices = {};
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  String _sortBy = 'name'; // 'name', 'status', 'responseTime'
+  bool _showOnlyIssues = false;
+  
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.toLowerCase();
+      });
+    });
     // Start periodic health checks when page loads
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = Provider.of<ServiceStatusProvider>(context, listen: false);
@@ -37,9 +50,39 @@ class _StatusPageState extends State<StatusPage> {
       provider.checkAllServices();
     });
   }
+  
+  // MARK: - Service Check Methods
+  /// Handles re-running health check for a single service
+  /// [serviceId] - ID of the service to check
+  /// Returns void
+  Future<void> _recheckService(String serviceId) async {
+    if (_checkingServices.contains(serviceId)) return;
+    
+    setState(() {
+      _checkingServices.add(serviceId);
+    });
+    
+    try {
+      final provider = Provider.of<ServiceStatusProvider>(context, listen: false);
+      await provider.checkService(serviceId);
+      Logger.logInfo('Manual recheck completed for service: $serviceId', 
+          'status_page.dart', '_recheckService');
+    } catch (e) {
+      Logger.logError('Error rechecking service: $serviceId', 
+          'status_page.dart', '_recheckService', e);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _checkingServices.remove(serviceId);
+        });
+      }
+    }
+  }
 
   @override
   void dispose() {
+    // Dispose search controller
+    _searchController.dispose();
     // Stop periodic checks when page is disposed
     final provider = Provider.of<ServiceStatusProvider>(context, listen: false);
     provider.stopPeriodicChecks();
@@ -54,11 +97,23 @@ class _StatusPageState extends State<StatusPage> {
         slivers: [
           // App Bar
           SliverAppBar(
-            expandedHeight: 120,
+            expandedHeight: 180,
             floating: false,
             pinned: true,
+            elevation: 0,
             flexibleSpace: FlexibleSpaceBar(
-              title: const Text('Infinitum Status'),
+              title: const Text(
+                'Infinitum Status',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black26,
+                      blurRadius: 4,
+                    ),
+                  ],
+                ),
+              ),
               background: Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -67,12 +122,121 @@ class _StatusPageState extends State<StatusPage> {
                     colors: [
                       Theme.of(context).colorScheme.primary,
                       Theme.of(context).colorScheme.primaryContainer,
+                      Theme.of(context).colorScheme.secondaryContainer,
                     ],
+                    stops: const [0.0, 0.5, 1.0],
                   ),
+                ),
+                child: Stack(
+                  children: [
+                    // Decorative circles
+                    Positioned(
+                      top: -50,
+                      right: -50,
+                      child: Container(
+                        width: 200,
+                        height: 200,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withOpacity(0.1),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      bottom: -30,
+                      left: -30,
+                      child: Container(
+                        width: 150,
+                        height: 150,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withOpacity(0.1),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
             actions: [
+              // Filter button
+              Consumer<ServiceStatusProvider>(
+                builder: (context, provider, _) {
+                  final hasIssues = provider.issuesCount > 0;
+                  return IconButton(
+                    icon: Stack(
+                      children: [
+                        Icon(
+                          _showOnlyIssues ? Icons.filter_alt : Icons.filter_alt_outlined,
+                          color: _showOnlyIssues ? Theme.of(context).colorScheme.primary : null,
+                        ),
+                        if (hasIssues && !_showOnlyIssues)
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            child: Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 1),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _showOnlyIssues = !_showOnlyIssues;
+                      });
+                    },
+                    tooltip: _showOnlyIssues ? 'Show All Services' : 'Show Only Issues',
+                  );
+                },
+              ),
+              // Sort button
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.sort),
+                tooltip: 'Sort Services',
+                onSelected: (value) {
+                  setState(() {
+                    _sortBy = value;
+                  });
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'name',
+                    child: Row(
+                      children: [
+                        Icon(Icons.sort_by_alpha, size: 20),
+                        SizedBox(width: 8),
+                        Text('Sort by Name'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'status',
+                    child: Row(
+                      children: [
+                        Icon(Icons.priority_high, size: 20),
+                        SizedBox(width: 8),
+                        Text('Sort by Status'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'responseTime',
+                    child: Row(
+                      children: [
+                        Icon(Icons.speed, size: 20),
+                        SizedBox(width: 8),
+                        Text('Sort by Response Time'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
               // Version info button
               IconButton(
                 icon: const Icon(Icons.info_outline),
@@ -103,6 +267,43 @@ class _StatusPageState extends State<StatusPage> {
             ],
           ),
           
+          // Search Bar
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search services...',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _searchController.clear();
+                            },
+                          )
+                        : null,
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          
           // Status Overview
           SliverToBoxAdapter(
             child: Consumer<ServiceStatusProvider>(
@@ -113,70 +314,247 @@ class _StatusPageState extends State<StatusPage> {
           ),
           
           // Infinitum Services Section
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-              child: Text(
-                'Infinitum Services',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-          ),
-          
           Consumer<ServiceStatusProvider>(
             builder: (context, provider, _) {
-              return SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final service = provider.infinitumServices[index];
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: ServiceStatusCard(
-                        service: service,
-                        onTap: () => _showServiceDetails(context, service),
-                        onReport: () => _showReportDialog(context, service),
+              final services = _filterAndSortServices(provider.infinitumServices);
+              if (services.isEmpty && (_searchQuery.isNotEmpty || _showOnlyIssues)) {
+                return const SliverToBoxAdapter(
+                  child: SizedBox.shrink(),
+                );
+              }
+              final responsive = context.responsive;
+              return SliverMainAxisGroup(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        responsive.isPhone ? 16 : 24,
+                        24,
+                        responsive.isPhone ? 16 : 24,
+                        8,
                       ),
-                    );
-                  },
-                  childCount: provider.infinitumServices.length,
-                ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.business,
+                              color: Theme.of(context).colorScheme.onPrimaryContainer,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Infinitum Services',
+                                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (services.length != provider.infinitumServices.length)
+                                  Text(
+                                    '${services.length} of ${provider.infinitumServices.length} shown',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Use list layout for all screen sizes (original design)
+                  SliverPadding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: responsive.isPhone ? 16 : 24,
+                    ),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final service = services[index];
+                          return Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: responsive.isPhone ? 0 : 8,
+                              vertical: 8,
+                            ),
+                            child: ServiceStatusCard(
+                              service: service,
+                              onTap: () => _showServiceDetails(context, service),
+                              onReport: () => _showReportDialog(context, service),
+                              onRecheck: () => _recheckService(service.id),
+                              isChecking: _checkingServices.contains(service.id),
+                            ),
+                          );
+                        },
+                        childCount: services.length,
+                      ),
+                    ),
+                  ),
+                ],
               );
             },
           ),
           
           // Third-Party Services Section
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-              child: Text(
-                'Third-Party Services',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-          ),
-          
           Consumer<ServiceStatusProvider>(
             builder: (context, provider, _) {
-              return SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final service = provider.thirdPartyServices[index];
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: ServiceStatusCard(
-                        service: service,
-                        onTap: () => _showServiceDetails(context, service),
-                        onReport: () => _showReportDialog(context, service),
+              final services = _filterAndSortServices(provider.thirdPartyServices);
+              if (services.isEmpty && (_searchQuery.isNotEmpty || _showOnlyIssues)) {
+                return const SliverToBoxAdapter(
+                  child: SizedBox.shrink(),
+                );
+              }
+              final responsive = context.responsive;
+              return SliverMainAxisGroup(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        responsive.isPhone ? 16 : 24,
+                        24,
+                        responsive.isPhone ? 16 : 24,
+                        8,
                       ),
-                    );
-                  },
-                  childCount: provider.thirdPartyServices.length,
-                ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.secondaryContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.cloud,
+                              color: Theme.of(context).colorScheme.onSecondaryContainer,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Third-Party Services',
+                                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (services.length != provider.thirdPartyServices.length)
+                                  Text(
+                                    '${services.length} of ${provider.thirdPartyServices.length} shown',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Use list layout for all screen sizes (original design)
+                  SliverPadding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: responsive.isPhone ? 16 : 24,
+                    ),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final service = services[index];
+                          return Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: responsive.isPhone ? 0 : 8,
+                              vertical: 8,
+                            ),
+                            child: ServiceStatusCard(
+                              service: service,
+                              onTap: () => _showServiceDetails(context, service),
+                              onReport: () => _showReportDialog(context, service),
+                              onRecheck: () => _recheckService(service.id),
+                              isChecking: _checkingServices.contains(service.id),
+                            ),
+                          );
+                        },
+                        childCount: services.length,
+                      ),
+                    ),
+                  ),
+                ],
               );
+            },
+          ),
+          
+          // Empty state message
+          Consumer<ServiceStatusProvider>(
+            builder: (context, provider, _) {
+              final infinitumFiltered = _filterAndSortServices(provider.infinitumServices);
+              final thirdPartyFiltered = _filterAndSortServices(provider.thirdPartyServices);
+              final hasResults = infinitumFiltered.isNotEmpty || thirdPartyFiltered.isNotEmpty;
+              final hasFilters = _searchQuery.isNotEmpty || _showOnlyIssues;
+              
+              if (!hasResults && hasFilters) {
+                return SliverToBoxAdapter(
+                  child: Container(
+                    margin: const EdgeInsets.all(32),
+                    padding: const EdgeInsets.all(32),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.search_off,
+                          size: 64,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.5),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No services found',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Try adjusting your search or filter settings',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _searchController.clear();
+                              _showOnlyIssues = false;
+                            });
+                          },
+                          icon: const Icon(Icons.clear_all),
+                          label: const Text('Clear Filters'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+              return const SliverToBoxAdapter(child: SizedBox.shrink());
             },
           ),
           
@@ -186,17 +564,77 @@ class _StatusPageState extends State<StatusPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          final provider = Provider.of<ServiceStatusProvider>(context, listen: false);
-          _showReportDialog(context, null, allServices: provider.allServices);
+      floatingActionButton: Consumer<ServiceStatusProvider>(
+        builder: (context, provider, _) {
+          return FloatingActionButton.extended(
+            onPressed: () {
+              _showReportDialog(context, null, allServices: provider.allServices);
+            },
+            icon: const Icon(Icons.report_problem),
+            label: const Text('Report Issue'),
+            backgroundColor: Theme.of(context).colorScheme.errorContainer,
+            foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
+            elevation: 4,
+          );
         },
-        icon: const Icon(Icons.report_problem),
-        label: const Text('Report Issue'),
       ),
     );
   }
 
+  // MARK: - Filter and Sort Methods
+  /// Filters and sorts services based on current search and filter settings
+  /// [services] - List of services to filter and sort
+  /// Returns filtered and sorted list
+  List<ServiceStatus> _filterAndSortServices(List<ServiceStatus> services) {
+    var filtered = services.where((service) {
+      // Search filter
+      if (_searchQuery.isNotEmpty) {
+        final matchesSearch = service.name.toLowerCase().contains(_searchQuery) ||
+            service.url.toLowerCase().contains(_searchQuery);
+        if (!matchesSearch) return false;
+      }
+      
+      // Issues filter
+      if (_showOnlyIssues && !service.hasIssues) {
+        return false;
+      }
+      
+      return true;
+    }).toList();
+    
+    // Sort
+    filtered.sort((a, b) {
+      switch (_sortBy) {
+        case 'status':
+          // Sort by status priority: down > degraded > unknown > operational
+          final statusPriority = {
+            ServiceHealthStatus.down: 0,
+            ServiceHealthStatus.degraded: 1,
+            ServiceHealthStatus.unknown: 2,
+            ServiceHealthStatus.operational: 3,
+          };
+          final aPriority = statusPriority[a.status] ?? 3;
+          final bPriority = statusPriority[b.status] ?? 3;
+          if (aPriority != bPriority) {
+            return aPriority.compareTo(bPriority);
+          }
+          return a.name.compareTo(b.name);
+        case 'responseTime':
+          if (a.responseTimeMs == b.responseTimeMs) {
+            return a.name.compareTo(b.name);
+          }
+          if (a.responseTimeMs == 0) return 1;
+          if (b.responseTimeMs == 0) return -1;
+          return a.responseTimeMs.compareTo(b.responseTimeMs);
+        case 'name':
+        default:
+          return a.name.compareTo(b.name);
+      }
+    });
+    
+    return filtered;
+  }
+  
   // MARK: - Status Overview Widget
   // Builds the overview section showing overall status statistics
   Widget _buildStatusOverview(BuildContext context, ServiceStatusProvider provider) {
@@ -205,20 +643,47 @@ class _StatusPageState extends State<StatusPage> {
     final degraded = allServices.where((s) => s.status == ServiceHealthStatus.degraded).length;
     final down = allServices.where((s) => s.status == ServiceHealthStatus.down).length;
     final unknown = allServices.where((s) => s.status == ServiceHealthStatus.unknown).length;
+    final total = allServices.length;
+    
+    // Calculate uptime percentage (operational / total)
+    final uptimePercentage = total > 0 ? (operational / total * 100) : 0.0;
+    
+    // Calculate average response time
+    final servicesWithResponseTime = allServices.where((s) => s.responseTimeMs > 0).toList();
+    final avgResponseTime = servicesWithResponseTime.isEmpty
+        ? 0
+        : (servicesWithResponseTime.map((s) => s.responseTimeMs).reduce((a, b) => a + b) /
+            servicesWithResponseTime.length).round();
     
     final lastCheck = provider.lastCheckTime;
     final lastCheckText = lastCheck != null
         ? DateFormat('MMM d, y • h:mm a').format(lastCheck)
         : 'Never';
     
+    final responsive = context.responsive;
     return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(20),
+      margin: EdgeInsets.all(responsive.isPhone ? 16 : 20),
+      padding: EdgeInsets.all(responsive.isPhone ? 16 : 20),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Theme.of(context).colorScheme.surfaceContainerHighest,
+            Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.7),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
         border: Border.all(
-          color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+          color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+          width: 1,
         ),
       ),
       child: Column(
@@ -240,60 +705,190 @@ class _StatusPageState extends State<StatusPage> {
             ],
           ),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _buildStatCard(
-                  context,
-                  'Operational',
-                  operational.toString(),
-                  allServices.length.toString(),
-                  const Color(0xFF10B981),
-                  Icons.check_circle,
+          // Stat cards - responsive layout (2x2 on mobile, single row on larger screens)
+          if (responsive.isPhone)
+            Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildStatCard(
+                        context,
+                        'Operational',
+                        operational.toString(),
+                        allServices.length.toString(),
+                        const Color(0xFF10B981),
+                        Icons.check_circle,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildStatCard(
+                        context,
+                        'Degraded',
+                        degraded.toString(),
+                        allServices.length.toString(),
+                        const Color(0xFFF59E0B),
+                        Icons.warning,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildStatCard(
-                  context,
-                  'Degraded',
-                  degraded.toString(),
-                  allServices.length.toString(),
-                  const Color(0xFFF59E0B),
-                  Icons.warning,
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildStatCard(
+                        context,
+                        'Down',
+                        down.toString(),
+                        allServices.length.toString(),
+                        const Color(0xFFEF4444),
+                        Icons.error,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildStatCard(
+                        context,
+                        'Unknown',
+                        unknown.toString(),
+                        allServices.length.toString(),
+                        const Color(0xFF6B7280),
+                        Icons.help_outline,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _buildStatCard(
-                  context,
-                  'Down',
-                  down.toString(),
-                  allServices.length.toString(),
-                  const Color(0xFFEF4444),
-                  Icons.error,
+              ],
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatCard(
+                    context,
+                    'Operational',
+                    operational.toString(),
+                    allServices.length.toString(),
+                    const Color(0xFF10B981),
+                    Icons.check_circle,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildStatCard(
-                  context,
-                  'Unknown',
-                  unknown.toString(),
-                  allServices.length.toString(),
-                  const Color(0xFF6B7280),
-                  Icons.help_outline,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildStatCard(
+                    context,
+                    'Degraded',
+                    degraded.toString(),
+                    allServices.length.toString(),
+                    const Color(0xFFF59E0B),
+                    Icons.warning,
+                  ),
                 ),
-              ),
-            ],
-          ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildStatCard(
+                    context,
+                    'Down',
+                    down.toString(),
+                    allServices.length.toString(),
+                    const Color(0xFFEF4444),
+                    Icons.error,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildStatCard(
+                    context,
+                    'Unknown',
+                    unknown.toString(),
+                    allServices.length.toString(),
+                    const Color(0xFF6B7280),
+                    Icons.help_outline,
+                  ),
+                ),
+              ],
+            ),
           const SizedBox(height: 16),
           Divider(color: Theme.of(context).colorScheme.outline.withOpacity(0.2)),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
+          // Uptime percentage
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFF10B981).withOpacity(0.1),
+                  const Color(0xFF10B981).withOpacity(0.05),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: const Color(0xFF10B981).withOpacity(0.3),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.trending_up,
+                    color: Color(0xFF10B981),
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'System Uptime',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                      ),
+                      Text(
+                        '${uptimePercentage.toStringAsFixed(1)}%',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: const Color(0xFF10B981),
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (avgResponseTime > 0)
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          'Avg Response',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          '${avgResponseTime}ms',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Icon(
@@ -302,12 +897,26 @@ class _StatusPageState extends State<StatusPage> {
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
               const SizedBox(width: 8),
-              Text(
-                'Last checked: $lastCheckText',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+              Expanded(
+                child: Text(
+                  'Last checked: $lastCheckText',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
+              if (lastCheck != null)
+                Flexible(
+                  child: Text(
+                    _formatTimeSince(lastCheck),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
             ],
           ),
         ],
@@ -369,9 +978,11 @@ class _StatusPageState extends State<StatusPage> {
   // MARK: - Service Details Dialog
   // Shows detailed information about a specific service
   void _showServiceDetails(BuildContext context, ServiceStatus service) {
+    final responsive = context.responsive;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        contentPadding: EdgeInsets.all(responsive.isPhone ? 16 : 24),
         title: Row(
           children: [
             Container(
@@ -383,18 +994,48 @@ class _StatusPageState extends State<StatusPage> {
               ),
             ),
             const SizedBox(width: 12),
-            Expanded(child: Text(service.name)),
+            Expanded(
+              child: Text(
+                service.name,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildDetailRow('Status', _getStatusText(service.status)),
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: responsive.dialogWidth,
+            maxHeight: responsive.height * 0.8,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+              // Status with color indicator
+              Row(
+                children: [
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: Color(service.statusColor),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildDetailRow('Status', _getStatusText(service.status)),
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
-              _buildDetailRow('URL', service.url),
+              _buildDetailRow('Service Type', service.type == ServiceType.infinitum ? 'Infinitum Service' : 'Third-Party Service'),
               const SizedBox(height: 12),
+              if (!shouldHideServiceUrl(service.id)) ...[
+                _buildDetailRow('URL', service.url),
+                const SizedBox(height: 12),
+              ],
               _buildDetailRow(
                 'Response Time',
                 service.responseTimeMs > 0
@@ -406,27 +1047,118 @@ class _StatusPageState extends State<StatusPage> {
                 'Last Checked',
                 DateFormat('MMM d, y • h:mm:ss a').format(service.lastChecked),
               ),
+              const SizedBox(height: 12),
+              _buildDetailRow(
+                'Time Since Last Check',
+                _formatTimeSince(service.lastChecked),
+              ),
               if (service.lastUpTime != null) ...[
                 const SizedBox(height: 12),
                 _buildDetailRow(
                   'Last Up',
                   DateFormat('MMM d, y • h:mm:ss a').format(service.lastUpTime!),
                 ),
+                const SizedBox(height: 12),
+                _buildDetailRow(
+                  'Uptime Since Last Up',
+                  _formatTimeSince(service.lastUpTime!),
+                ),
               ],
               if (service.errorMessage != null) ...[
                 const SizedBox(height: 12),
-                _buildDetailRow('Error', service.errorMessage!),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            size: 16,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Error Message',
+                            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                  color: Theme.of(context).colorScheme.error,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        service.errorMessage!,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
               if (service.consecutiveFailures > 0) ...[
                 const SizedBox(height: 12),
-                _buildDetailRow(
-                  'Consecutive Failures',
-                  service.consecutiveFailures.toString(),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildDetailRow(
+                          'Consecutive Failures',
+                          service.consecutiveFailures.toString(),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
+              const SizedBox(height: 12),
+              // Service health summary
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Health Summary',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildDetailRow('Is Operational', service.isOperational ? 'Yes' : 'No'),
+                    const SizedBox(height: 4),
+                    _buildDetailRow('Has Issues', service.hasIssues ? 'Yes' : 'No'),
+                    const SizedBox(height: 4),
+                    _buildDetailRow('Status Code', service.status.name.toUpperCase()),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
+      ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
@@ -447,30 +1179,75 @@ class _StatusPageState extends State<StatusPage> {
   // MARK: - Detail Row Widget
   // Builds a row for service details
   Widget _buildDetailRow(String label, String value) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 120,
-          child: Text(
-            label,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+    final responsive = context.responsive;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: responsive.isPhone
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  overflow: TextOverflow.visible,
+                  softWrap: true,
+                ),
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: responsive.isTablet ? 140 : 160,
+                  child: Text(
+                    label,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    overflow: TextOverflow.visible,
+                    softWrap: true,
+                  ),
+                ),
+              ],
             ),
-          ),
-        ),
-      ],
     );
   }
 
   // MARK: - Status Text Helper
   // Converts status enum to readable text
+  // Formats time since a given DateTime
+  String _formatTimeSince(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+    
+    if (difference.inSeconds < 60) {
+      return '${difference.inSeconds} seconds ago';
+    } else if (difference.inMinutes < 60) {
+      return '${difference.inMinutes} minute${difference.inMinutes == 1 ? '' : 's'} ago';
+    } else if (difference.inHours < 24) {
+      return '${difference.inHours} hour${difference.inHours == 1 ? '' : 's'} ago';
+    } else if (difference.inDays < 30) {
+      return '${difference.inDays} day${difference.inDays == 1 ? '' : 's'} ago';
+    } else {
+      final months = (difference.inDays / 30).floor();
+      return '$months month${months == 1 ? '' : 's'} ago';
+    }
+  }
+  
   String _getStatusText(ServiceHealthStatus status) {
     switch (status) {
       case ServiceHealthStatus.operational:

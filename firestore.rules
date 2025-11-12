@@ -1,0 +1,79 @@
+// Filename: firestore.rules
+// Purpose: Firestore security rules for Infinitum Down Detector
+// Author: Kevin Doyle Jr. / Infinitum Imagery LLC
+// Last Modified: 2025-01-27
+// Platform Compatibility: Firebase Firestore
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // MARK: - Service Status Cache Collection
+    // Public read/write access for real-time status sharing across all users
+    // No authentication required - allows anonymous users to read and write
+    match /service_status_cache/{serviceId} {
+      // Allow anyone to read service status (public status page)
+      // No authentication required
+      allow read: if true;
+      
+      // Allow anyone to write service status (any user can update status after health check)
+      // No authentication required - enables real-time status sharing
+      // Validate required fields exist and are correct types
+      // Optional fields (lastUpTime, errorMessage) can be null
+      allow create, update: if request.resource.data.keys().hasAll(['id', 'name', 'url', 'type', 'status', 'lastChecked', 'responseTimeMs', 'consecutiveFailures'])
+                           && request.resource.data.id is string
+                           && request.resource.data.name is string
+                           && request.resource.data.url is string
+                           && request.resource.data.type is string
+                           && request.resource.data.status is string
+                           && request.resource.data.lastChecked is timestamp
+                           && request.resource.data.responseTimeMs is int
+                           && request.resource.data.consecutiveFailures is int
+                           && (request.resource.data.lastUpTime == null || request.resource.data.lastUpTime is timestamp)
+                           && (request.resource.data.errorMessage == null || request.resource.data.errorMessage is string);
+      
+      // Allow delete only for cleanup (optional)
+      allow delete: if false;
+    }
+    
+    // Allow read/write to last_update document
+    match /service_status_cache/last_update {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // MARK: - Reports Collection
+    // Public write access for issue reporting, restricted read access
+    match /reports/{reportId} {
+      // Allow anyone to create reports (users can submit issue reports)
+      // Validate required fields and data types
+      allow create: if request.resource.data.keys().hasAll(['serviceId', 'serviceName', 'description', 'timestamp', 'status'])
+                   && request.resource.data.serviceId is string
+                   && request.resource.data.serviceName is string
+                   && request.resource.data.description is string
+                   && request.resource.data.timestamp is string
+                   && request.resource.data.status is string
+                   && request.resource.data.description.size() > 0
+                   && request.resource.data.description.size() <= 5000
+                   && (request.resource.data.reporterName == null || request.resource.data.reporterName is string)
+                   && (request.resource.data.reporterEmail == null || request.resource.data.reporterEmail is string)
+                   && (request.resource.data.reportType == null || request.resource.data.reportType is string);
+      
+      // Allow authenticated users to read reports (for admin dashboard later)
+      // For now, restrict read access - only authenticated users can read
+      // You can add admin role checking later: request.auth.token.admin == true
+      allow read: if request.auth != null;
+      
+      // No updates or deletes allowed (reports are immutable)
+      allow update, delete: if false;
+    }
+    
+    // MARK: - Default Deny
+    // Deny access to any other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

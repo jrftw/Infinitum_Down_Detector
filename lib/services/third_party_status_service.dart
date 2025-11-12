@@ -2,12 +2,11 @@
 // Purpose: Service for checking third-party service status (Firebase, Google, Apple, Discord, TikTok)
 // Author: Kevin Doyle Jr. / Infinitum Imagery LLC
 // Last Modified: 2025-01-27
-// Dependencies: dio, cloud_functions, config.dart, logger.dart, models/service_status.dart
+// Dependencies: dio, config.dart, logger.dart, models/service_status.dart
 // Platform Compatibility: Web, iOS, Android
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import '../core/config.dart';
 import '../core/logger.dart';
 import '../models/service_status.dart';
@@ -85,8 +84,64 @@ class ThirdPartyStatusService {
     );
   }
   
+  /// Checks AWS service status
+  /// Returns ServiceStatus for AWS
+  Future<ServiceStatus> checkAWSStatus() async {
+    return _checkThirdPartyService(
+      id: 'aws',
+      name: 'AWS',
+      url: ThirdPartyServiceUrls.awsStatus,
+    );
+  }
+  
+  // MARK: - Helper Method: Process Third-Party Response
+  // Processes HTTP response for third-party services
+  // [initialStatus] - Initial service status
+  // [response] - HTTP response from Dio
+  // [name] - Service display name
+  // [startTime] - Start time of the request
+  // Returns updated ServiceStatus
+  ServiceStatus _processThirdPartyResponse({
+    required ServiceStatus initialStatus,
+    required Response response,
+    required String name,
+    required DateTime startTime,
+  }) {
+    final endTime = DateTime.now();
+    final responseTime = endTime.difference(startTime).inMilliseconds;
+    
+    ServiceHealthStatus newStatus;
+    String? errorMessage;
+    int consecutiveFailures = 0;
+    DateTime? lastUpTime;
+    
+    if (response.statusCode != null && response.statusCode! >= 200 && response.statusCode! < 400) {
+      // For third-party status pages, we check if the page loads
+      // A more sophisticated check could parse the status page content
+      newStatus = ServiceHealthStatus.operational;
+      lastUpTime = DateTime.now();
+      Logger.logInfo('$name status page accessible', 
+          'third_party_status_service.dart', '_processThirdPartyResponse');
+    } else {
+      newStatus = ServiceHealthStatus.degraded;
+      errorMessage = 'HTTP ${response.statusCode}';
+      consecutiveFailures = 1;
+      Logger.logWarning('$name status page returned ${response.statusCode}', 
+          'third_party_status_service.dart', '_processThirdPartyResponse');
+    }
+    
+    return initialStatus.copyWith(
+      status: newStatus,
+      lastChecked: DateTime.now(),
+      lastUpTime: lastUpTime,
+      responseTimeMs: responseTime,
+      errorMessage: errorMessage,
+      consecutiveFailures: consecutiveFailures,
+    );
+  }
+
   /// Generic method to check any third-party service
-  /// On web, uses Firebase Functions to bypass CORS restrictions
+  /// On web, uses CORS proxy to bypass CORS restrictions
   /// On mobile, uses direct HTTP requests
   /// [id] - Unique identifier for the service
   /// [name] - Display name of the service
@@ -105,93 +160,136 @@ class ThirdPartyStatusService {
       type: ServiceType.thirdParty,
     );
     
-    // MARK: - Web Platform: Use Firebase Functions
-    // On web, use Firebase Functions to bypass CORS restrictions
+    // MARK: - Web Platform: Use CORS Proxy
+    // On web, always use CORS proxy for external domains to avoid CORS issues
     if (kIsWeb) {
       try {
-        Logger.logDebug('Checking third-party service: $name via Firebase Function ($url)', 
+        Logger.logDebug('Checking third-party service: $name ($url)', 
             'third_party_status_service.dart', '_checkThirdPartyService');
         
-        final functions = FirebaseFunctions.instance;
-        final callable = functions.httpsCallable('checkServiceHealth');
+        // On web, always use CORS proxy for external requests
+        // Try primary proxy first
+        Response? proxyResponse;
+        bool proxySuccess = false;
         
-        final result = await callable.call({
-          'url': url,
-          'serviceId': id,
-          'serviceName': name,
-        });
-        
-        final data = result.data as Map<String, dynamic>;
-        final endTime = DateTime.now();
-        final responseTime = data['responseTime'] as int? ?? endTime.difference(startTime).inMilliseconds;
-        
-        ServiceHealthStatus newStatus;
-        final statusString = data['status'] as String? ?? 'unknown';
-        switch (statusString) {
-          case 'operational':
-            newStatus = ServiceHealthStatus.operational;
-            break;
-          case 'degraded':
-            newStatus = ServiceHealthStatus.degraded;
-            break;
-          case 'down':
-            newStatus = ServiceHealthStatus.down;
-            break;
-          default:
-            newStatus = ServiceHealthStatus.unknown;
-        }
-        
-        final errorMessage = data['errorMessage'] as String?;
-        
-        int consecutiveFailures = 0;
-        DateTime? lastUpTime;
-        
-        if (newStatus == ServiceHealthStatus.operational) {
-          consecutiveFailures = 0;
-          lastUpTime = DateTime.now();
-          Logger.logInfo('$name status page accessible', 
-              'third_party_status_service.dart', '_checkThirdPartyService');
-        } else {
-          consecutiveFailures = 1;
-          Logger.logWarning('$name status: $statusString', 
+        try {
+          final primaryProxyUrl = '$CORS_PROXY_URL${Uri.encodeComponent(url)}';
+          proxyResponse = await _dio.get(
+            primaryProxyUrl,
+            options: Options(
+              validateStatus: (status) => status != null && status < 500,
+              followRedirects: true,
+              maxRedirects: 5,
+              responseType: ResponseType.plain,
+            ),
+          );
+          
+          // If proxy returns content, treat as success
+          if (proxyResponse.data != null && proxyResponse.data.toString().isNotEmpty) {
+            proxySuccess = true;
+            return _processThirdPartyResponse(
+              initialStatus: initialStatus,
+              response: proxyResponse,
+              name: name,
+              startTime: startTime,
+            );
+          }
+        } on DioException catch (e) {
+          Logger.logDebug('Primary CORS proxy failed for $name, trying fallback', 
               'third_party_status_service.dart', '_checkThirdPartyService');
         }
         
-        return initialStatus.copyWith(
-          status: newStatus,
-          lastChecked: DateTime.now(),
-          lastUpTime: lastUpTime,
-          responseTimeMs: responseTime,
-          errorMessage: errorMessage,
-          consecutiveFailures: consecutiveFailures,
-        );
+        // Try fallback proxy if primary failed or returned empty
+        if (!proxySuccess) {
+          try {
+            final fallbackProxyUrl = '$CORS_PROXY_FALLBACK_URL${Uri.encodeComponent(url)}';
+            proxyResponse = await _dio.get(
+              fallbackProxyUrl,
+              options: Options(
+                validateStatus: (status) => status != null && status < 500,
+                followRedirects: true,
+                maxRedirects: 5,
+                responseType: ResponseType.plain,
+              ),
+            );
+            
+            if (proxyResponse.data != null && proxyResponse.data.toString().isNotEmpty) {
+              proxySuccess = true;
+              return _processThirdPartyResponse(
+                initialStatus: initialStatus,
+                response: proxyResponse,
+                name: name,
+                startTime: startTime,
+              );
+            }
+          } on DioException catch (e) {
+            Logger.logDebug('Fallback CORS proxy failed for $name, trying direct request', 
+                'third_party_status_service.dart', '_checkThirdPartyService');
+          }
+        }
         
-      } on FirebaseFunctionsException catch (e) {
-        final endTime = DateTime.now();
-        final responseTime = endTime.difference(startTime).inMilliseconds;
-        
-        Logger.logError('Firebase Function error checking $name: ${e.message}', 
-            'third_party_status_service.dart', '_checkThirdPartyService', e);
-        
-        return initialStatus.copyWith(
-          status: ServiceHealthStatus.unknown,
-          lastChecked: DateTime.now(),
-          responseTimeMs: responseTime,
-          errorMessage: 'Function error: ${e.message}',
-          consecutiveFailures: 1,
-        );
+        // If both proxies failed, try direct request as last resort
+        try {
+          final response = await _dio.get(
+            url,
+            options: Options(
+              validateStatus: (status) => status != null && status < 500,
+              followRedirects: true,
+              maxRedirects: 5,
+              responseType: ResponseType.plain,
+            ),
+          );
+          
+          return _processThirdPartyResponse(
+            initialStatus: initialStatus,
+            response: response,
+            name: name,
+            startTime: startTime,
+          );
+        } catch (directError) {
+          // All methods failed
+          final endTime = DateTime.now();
+          final responseTime = endTime.difference(startTime).inMilliseconds;
+          
+          String errorMsg = 'All connection methods failed';
+          ServiceHealthStatus newStatus = ServiceHealthStatus.unknown;
+          
+          if (directError is DioException) {
+            if (directError.type == DioExceptionType.connectionTimeout || 
+                directError.type == DioExceptionType.receiveTimeout) {
+              errorMsg = 'Connection timeout';
+              newStatus = ServiceHealthStatus.down;
+            } else if (directError.type == DioExceptionType.connectionError) {
+              errorMsg = 'Connection error (CORS blocked)';
+              newStatus = ServiceHealthStatus.unknown;
+            } else {
+              errorMsg = directError.message ?? 'Unknown error';
+            }
+          }
+          
+          Logger.logError('Error checking $name on web: $errorMsg', 
+              'third_party_status_service.dart', '_checkThirdPartyService', directError);
+          
+          return initialStatus.copyWith(
+            status: newStatus,
+            lastChecked: DateTime.now(),
+            responseTimeMs: responseTime,
+            errorMessage: errorMsg,
+            consecutiveFailures: 1,
+          );
+        }
       } catch (e) {
         final endTime = DateTime.now();
         final responseTime = endTime.difference(startTime).inMilliseconds;
         
-        Logger.logError('Unexpected error checking $name via Firebase Function', 
+        Logger.logError('Unexpected error checking $name on web', 
             'third_party_status_service.dart', '_checkThirdPartyService', e);
         
         return initialStatus.copyWith(
           status: ServiceHealthStatus.unknown,
           lastChecked: DateTime.now(),
           responseTimeMs: responseTime,
-          errorMessage: 'Unexpected error: ${e.toString()}',
+          errorMessage: 'Error: ${e.toString()}',
           consecutiveFailures: 1,
         );
       }
@@ -212,36 +310,11 @@ class ThirdPartyStatusService {
         ),
       );
       
-      final endTime = DateTime.now();
-      final responseTime = endTime.difference(startTime).inMilliseconds;
-      
-      ServiceHealthStatus newStatus;
-      String? errorMessage;
-      int consecutiveFailures = 0;
-      DateTime? lastUpTime;
-      
-      if (response.statusCode != null && response.statusCode! >= 200 && response.statusCode! < 400) {
-        // For third-party status pages, we check if the page loads
-        // A more sophisticated check could parse the status page content
-        newStatus = ServiceHealthStatus.operational;
-        lastUpTime = DateTime.now();
-        Logger.logInfo('$name status page accessible', 
-            'third_party_status_service.dart', '_checkThirdPartyService');
-      } else {
-        newStatus = ServiceHealthStatus.degraded;
-        errorMessage = 'HTTP ${response.statusCode}';
-        consecutiveFailures = 1;
-        Logger.logWarning('$name status page returned ${response.statusCode}', 
-            'third_party_status_service.dart', '_checkThirdPartyService');
-      }
-      
-      return initialStatus.copyWith(
-        status: newStatus,
-        lastChecked: DateTime.now(),
-        lastUpTime: lastUpTime,
-        responseTimeMs: responseTime,
-        errorMessage: errorMessage,
-        consecutiveFailures: consecutiveFailures,
+      return _processThirdPartyResponse(
+        initialStatus: initialStatus,
+        response: response,
+        name: name,
+        startTime: startTime,
       );
       
     } on DioException catch (e) {
@@ -303,6 +376,7 @@ class ThirdPartyStatusService {
       checkAppleStatus(),
       checkDiscordStatus(),
       checkTikTokStatus(),
+      checkAWSStatus(),
     ];
     
     final results = await Future.wait(futures);

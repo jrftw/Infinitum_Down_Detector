@@ -35,7 +35,7 @@ class ChangelogData {
           'Issue reporting system with spam protection',
           'Automatic periodic health checks (every 60 seconds)',
           'Status overview dashboard',
-          'Firebase Functions integration for CORS-free health checks',
+          'CORS proxy integration for web platform health checks',
           'Data feed issue detection for iView/InfiniView',
           'Modern UI with dark mode support',
           'Responsive design for web, iOS, and Android',

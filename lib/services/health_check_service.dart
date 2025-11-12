@@ -2,13 +2,12 @@
 // Purpose: Service for performing health checks on monitored URLs
 // Author: Kevin Doyle Jr. / Infinitum Imagery LLC
 // Last Modified: 2025-01-27
-// Dependencies: dio, cloud_functions, config.dart, logger.dart, models/service_status.dart
+// Dependencies: dio, config.dart, logger.dart, models/service_status.dart
 // Platform Compatibility: Web, iOS, Android
 
 import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import '../core/config.dart';
 import '../core/logger.dart';
 import '../models/service_status.dart';
@@ -35,107 +34,244 @@ class HealthCheckService {
     Logger.logInfo('HealthCheckService initialized', 'health_check_service.dart', 'HealthCheckService');
   }
 
+  // MARK: - Helper Method: Process Health Check Response
+  // Processes HTTP response and returns updated ServiceStatus
+  // [serviceStatus] - Current service status
+  // [response] - HTTP response from Dio
+  // [startTime] - Start time of the request
+  // Returns updated ServiceStatus
+  ServiceStatus _processHealthCheckResponse({
+    required ServiceStatus serviceStatus,
+    required Response response,
+    required DateTime startTime,
+  }) {
+    final endTime = DateTime.now();
+    final responseTime = endTime.difference(startTime).inMilliseconds;
+    
+    ServiceHealthStatus newStatus;
+    String? errorMessage;
+    int consecutiveFailures = serviceStatus.consecutiveFailures;
+    DateTime? lastUpTime = serviceStatus.lastUpTime;
+    
+    // MARK: - Response Body Content Check
+    // Check response body for specific issues (e.g., data feed issues for iView)
+    String? responseBody;
+    bool hasDataFeedIssue = false;
+    
+    if (response.statusCode != null && response.statusCode! >= 200 && response.statusCode! < 400) {
+      // Get response body as string for content checking
+      try {
+        responseBody = response.data?.toString() ?? '';
+        
+        // Check for data feed issue specifically for iView/InfiniView
+        if (serviceStatus.id == 'infinitum-view') {
+          // Search for data feed issue text (case-insensitive, handles whitespace variations and line breaks)
+          // The text can appear as: "Stats may be delayed/inaccurate due to a data feed issue."
+          // Or with line break: "Stats may be delayed/inaccurate\ndue to a data feed issue."
+          const dataFeedIssueText = 'Stats may be delayed/inaccurate due to a data feed issue.';
+          final responseBodyLower = responseBody.toLowerCase();
+          final searchTextLower = dataFeedIssueText.toLowerCase();
+          
+          // Normalize whitespace (replace all whitespace including line breaks with single space)
+          final normalizedBody = responseBodyLower.replaceAll(RegExp(r'\s+'), ' ');
+          final normalizedSearch = searchTextLower.replaceAll(RegExp(r'\s+'), ' ');
+          
+          // Check variations: with period, without period, with normalized whitespace
+          final searchTextNoPeriod = normalizedSearch.replaceAll('.', '');
+          hasDataFeedIssue = normalizedBody.contains(normalizedSearch) || 
+                            normalizedBody.contains(searchTextNoPeriod) ||
+                            (responseBodyLower.contains('stats may be delayed/inaccurate') &&
+                            responseBodyLower.contains('data feed issue'));
+          
+          if (hasDataFeedIssue) {
+            newStatus = ServiceHealthStatus.degraded;
+            errorMessage = 'Data feed issue detected';
+            consecutiveFailures++;
+            Logger.logWarning('${serviceStatus.name} is up but has data feed issue', 
+                'health_check_service.dart', '_processHealthCheckResponse');
+          } else {
+            newStatus = ServiceHealthStatus.operational;
+            consecutiveFailures = 0;
+            lastUpTime = DateTime.now();
+            Logger.logInfo('${serviceStatus.name} is operational (${response.statusCode})', 
+                'health_check_service.dart', '_processHealthCheckResponse');
+          }
+        } else {
+          newStatus = ServiceHealthStatus.operational;
+          consecutiveFailures = 0;
+          lastUpTime = DateTime.now();
+          Logger.logInfo('${serviceStatus.name} is operational (${response.statusCode})', 
+              'health_check_service.dart', '_processHealthCheckResponse');
+        }
+      } catch (e) {
+        // If we can't parse the response body, assume operational if status is good
+        newStatus = ServiceHealthStatus.operational;
+        consecutiveFailures = 0;
+        lastUpTime = DateTime.now();
+        Logger.logWarning('${serviceStatus.name} is operational but could not parse response body', 
+            'health_check_service.dart', '_processHealthCheckResponse');
+      }
+    } else if (response.statusCode != null && response.statusCode! >= 400 && response.statusCode! < 500) {
+      newStatus = ServiceHealthStatus.degraded;
+      errorMessage = 'HTTP ${response.statusCode}';
+      consecutiveFailures++;
+      Logger.logWarning('${serviceStatus.name} returned ${response.statusCode}', 
+          'health_check_service.dart', '_processHealthCheckResponse');
+    } else {
+      newStatus = ServiceHealthStatus.down;
+      errorMessage = 'HTTP ${response.statusCode ?? "Unknown"}';
+      consecutiveFailures++;
+      Logger.logError('${serviceStatus.name} is down (${response.statusCode})', 
+          'health_check_service.dart', '_processHealthCheckResponse');
+    }
+    
+    return serviceStatus.copyWith(
+      status: newStatus,
+      lastChecked: DateTime.now(),
+      lastUpTime: lastUpTime,
+      responseTimeMs: responseTime,
+      errorMessage: errorMessage,
+      consecutiveFailures: consecutiveFailures,
+    );
+  }
+
   // MARK: - Health Check Methods
   /// Performs a health check on a single service
-  /// On web, uses Firebase Functions to bypass CORS restrictions
+  /// On web, uses CORS proxy to bypass CORS restrictions
   /// On mobile, uses direct HTTP requests
   /// [serviceStatus] - The current service status to check
   /// Returns updated ServiceStatus with latest health information
   Future<ServiceStatus> checkServiceHealth(ServiceStatus serviceStatus) async {
     final startTime = DateTime.now();
     
-    // MARK: - Web Platform: Use Firebase Functions
-    // On web, use Firebase Functions to bypass CORS restrictions
+    // MARK: - Web Platform: Use CORS Proxy
+    // On web, always use CORS proxy for external domains to avoid CORS issues
     if (kIsWeb) {
       try {
-        Logger.logDebug('Checking health for ${serviceStatus.name} via Firebase Function (${serviceStatus.url})', 
+        Logger.logDebug('Checking health for ${serviceStatus.name} (${serviceStatus.url})', 
             'health_check_service.dart', 'checkServiceHealth');
         
-        final functions = FirebaseFunctions.instance;
-        final callable = functions.httpsCallable('checkServiceHealth');
+        // On web, always use CORS proxy for external requests
+        // Try primary proxy first
+        Response? proxyResponse;
+        bool proxySuccess = false;
         
-        final result = await callable.call({
-          'url': serviceStatus.url,
-          'serviceId': serviceStatus.id,
-          'serviceName': serviceStatus.name,
-        });
-        
-        final data = result.data as Map<String, dynamic>;
-        final endTime = DateTime.now();
-        final responseTime = data['responseTime'] as int? ?? endTime.difference(startTime).inMilliseconds;
-        
-        ServiceHealthStatus newStatus;
-        final statusString = data['status'] as String? ?? 'unknown';
-        switch (statusString) {
-          case 'operational':
-            newStatus = ServiceHealthStatus.operational;
-            break;
-          case 'degraded':
-            newStatus = ServiceHealthStatus.degraded;
-            break;
-          case 'down':
-            newStatus = ServiceHealthStatus.down;
-            break;
-          default:
-            newStatus = ServiceHealthStatus.unknown;
-        }
-        
-        final errorMessage = data['errorMessage'] as String?;
-        final hasDataFeedIssue = data['hasDataFeedIssue'] as bool? ?? false;
-        
-        int consecutiveFailures = serviceStatus.consecutiveFailures;
-        DateTime? lastUpTime = serviceStatus.lastUpTime;
-        
-        if (newStatus == ServiceHealthStatus.operational) {
-          consecutiveFailures = 0;
-          lastUpTime = DateTime.now();
-          Logger.logInfo('${serviceStatus.name} is operational', 
-              'health_check_service.dart', 'checkServiceHealth');
-        } else if (hasDataFeedIssue) {
-          consecutiveFailures++;
-          Logger.logWarning('${serviceStatus.name} is up but has data feed issue', 
-              'health_check_service.dart', 'checkServiceHealth');
-        } else {
-          consecutiveFailures++;
-          Logger.logWarning('${serviceStatus.name} status: $statusString', 
+        try {
+          final primaryProxyUrl = '$CORS_PROXY_URL${Uri.encodeComponent(serviceStatus.url)}';
+          proxyResponse = await _dio.get(
+            primaryProxyUrl,
+            options: Options(
+              validateStatus: (status) => status != null && status < 500,
+              followRedirects: true,
+              maxRedirects: 5,
+              responseType: ResponseType.plain,
+            ),
+          );
+          
+          // If proxy returns content, treat as success (proxy returns 200 even if service is down)
+          // We check if we got actual content back
+          if (proxyResponse.data != null && proxyResponse.data.toString().isNotEmpty) {
+            proxySuccess = true;
+            return _processHealthCheckResponse(
+              serviceStatus: serviceStatus,
+              response: proxyResponse,
+              startTime: startTime,
+            );
+          }
+        } on DioException catch (e) {
+          Logger.logDebug('Primary CORS proxy failed for ${serviceStatus.name}, trying fallback', 
               'health_check_service.dart', 'checkServiceHealth');
         }
         
-        return serviceStatus.copyWith(
-          status: newStatus,
-          lastChecked: DateTime.now(),
-          lastUpTime: lastUpTime,
-          responseTimeMs: responseTime,
-          errorMessage: errorMessage,
-          consecutiveFailures: consecutiveFailures,
-        );
+        // Try fallback proxy if primary failed or returned empty
+        if (!proxySuccess) {
+          try {
+            final fallbackProxyUrl = '$CORS_PROXY_FALLBACK_URL${Uri.encodeComponent(serviceStatus.url)}';
+            proxyResponse = await _dio.get(
+              fallbackProxyUrl,
+              options: Options(
+                validateStatus: (status) => status != null && status < 500,
+                followRedirects: true,
+                maxRedirects: 5,
+                responseType: ResponseType.plain,
+              ),
+            );
+            
+            if (proxyResponse.data != null && proxyResponse.data.toString().isNotEmpty) {
+              proxySuccess = true;
+              return _processHealthCheckResponse(
+                serviceStatus: serviceStatus,
+                response: proxyResponse,
+                startTime: startTime,
+              );
+            }
+          } on DioException catch (e) {
+            Logger.logDebug('Fallback CORS proxy failed for ${serviceStatus.name}, trying direct request', 
+                'health_check_service.dart', 'checkServiceHealth');
+          }
+        }
         
-      } on FirebaseFunctionsException catch (e) {
-        final endTime = DateTime.now();
-        final responseTime = endTime.difference(startTime).inMilliseconds;
-        
-        Logger.logError('Firebase Function error checking ${serviceStatus.name}: ${e.message}', 
-            'health_check_service.dart', 'checkServiceHealth', e);
-        
-        return serviceStatus.copyWith(
-          status: ServiceHealthStatus.unknown,
-          lastChecked: DateTime.now(),
-          responseTimeMs: responseTime,
-          errorMessage: 'Function error: ${e.message}',
-          consecutiveFailures: serviceStatus.consecutiveFailures + 1,
-        );
+        // If both proxies failed, try direct request as last resort
+        try {
+          final response = await _dio.get(
+            serviceStatus.url,
+            options: Options(
+              validateStatus: (status) => status != null && status < 500,
+              followRedirects: true,
+              maxRedirects: 5,
+              responseType: ResponseType.plain,
+            ),
+          );
+          
+          return _processHealthCheckResponse(
+            serviceStatus: serviceStatus,
+            response: response,
+            startTime: startTime,
+          );
+        } catch (directError) {
+          // All methods failed
+          final endTime = DateTime.now();
+          final responseTime = endTime.difference(startTime).inMilliseconds;
+          
+          String errorMsg = 'All connection methods failed';
+          ServiceHealthStatus newStatus = ServiceHealthStatus.unknown;
+          
+          if (directError is DioException) {
+            if (directError.type == DioExceptionType.connectionTimeout || 
+                directError.type == DioExceptionType.receiveTimeout) {
+              errorMsg = 'Connection timeout';
+              newStatus = ServiceHealthStatus.down;
+            } else if (directError.type == DioExceptionType.connectionError) {
+              errorMsg = 'Connection error (CORS blocked)';
+              newStatus = ServiceHealthStatus.unknown;
+            } else {
+              errorMsg = directError.message ?? 'Unknown error';
+            }
+          }
+          
+          Logger.logError('Error checking ${serviceStatus.name} on web: $errorMsg', 
+              'health_check_service.dart', 'checkServiceHealth', directError);
+          
+          return serviceStatus.copyWith(
+            status: newStatus,
+            lastChecked: DateTime.now(),
+            responseTimeMs: responseTime,
+            errorMessage: errorMsg,
+            consecutiveFailures: serviceStatus.consecutiveFailures + 1,
+          );
+        }
       } catch (e) {
         final endTime = DateTime.now();
         final responseTime = endTime.difference(startTime).inMilliseconds;
         
-        Logger.logError('Unexpected error checking ${serviceStatus.name} via Firebase Function', 
+        Logger.logError('Unexpected error checking ${serviceStatus.name} on web', 
             'health_check_service.dart', 'checkServiceHealth', e);
         
         return serviceStatus.copyWith(
           status: ServiceHealthStatus.unknown,
           lastChecked: DateTime.now(),
           responseTimeMs: responseTime,
-          errorMessage: 'Unexpected error: ${e.toString()}',
+          errorMessage: 'Error: ${e.toString()}',
           consecutiveFailures: serviceStatus.consecutiveFailures + 1,
         );
       }
@@ -157,84 +293,10 @@ class HealthCheckService {
         ),
       );
       
-      final endTime = DateTime.now();
-      final responseTime = endTime.difference(startTime).inMilliseconds;
-      
-      ServiceHealthStatus newStatus;
-      String? errorMessage;
-      int consecutiveFailures = serviceStatus.consecutiveFailures;
-      DateTime? lastUpTime = serviceStatus.lastUpTime;
-      
-      // MARK: - Response Body Content Check
-      // Check response body for specific issues (e.g., data feed issues for iView)
-      String? responseBody;
-      bool hasDataFeedIssue = false;
-      
-      if (response.statusCode != null && response.statusCode! >= 200 && response.statusCode! < 400) {
-        // Get response body as string for content checking
-        try {
-          responseBody = response.data?.toString() ?? '';
-          
-          // Check for data feed issue specifically for iView/InfiniView
-          if (serviceStatus.id == 'infinitum-view') {
-            // Search for data feed issue text (case-insensitive, handles whitespace variations)
-            const dataFeedIssueText = 'Stats may be delayed/inaccurate due to a data feed issue.';
-            final responseBodyLower = responseBody.toLowerCase();
-            final searchTextLower = dataFeedIssueText.toLowerCase();
-            // Also check for variations without the period
-            final searchTextNoPeriod = searchTextLower.replaceAll('.', '');
-            hasDataFeedIssue = responseBodyLower.contains(searchTextLower) || 
-                              responseBodyLower.contains(searchTextNoPeriod);
-            
-            if (hasDataFeedIssue) {
-              newStatus = ServiceHealthStatus.degraded;
-              errorMessage = 'Data feed issue detected';
-              consecutiveFailures++;
-              Logger.logWarning('${serviceStatus.name} is up but has data feed issue', 
-                  'health_check_service.dart', 'checkServiceHealth');
-            } else {
-              newStatus = ServiceHealthStatus.operational;
-              consecutiveFailures = 0;
-              lastUpTime = DateTime.now();
-              Logger.logInfo('${serviceStatus.name} is operational (${response.statusCode})', 
-                  'health_check_service.dart', 'checkServiceHealth');
-            }
-          } else {
-            newStatus = ServiceHealthStatus.operational;
-            consecutiveFailures = 0;
-            lastUpTime = DateTime.now();
-            Logger.logInfo('${serviceStatus.name} is operational (${response.statusCode})', 
-                'health_check_service.dart', 'checkServiceHealth');
-          }
-        } catch (e) {
-          // If we can't parse the response body, assume operational if status is good
-          newStatus = ServiceHealthStatus.operational;
-          consecutiveFailures = 0;
-          lastUpTime = DateTime.now();
-          Logger.logWarning('${serviceStatus.name} is operational but could not parse response body', 
-              'health_check_service.dart', 'checkServiceHealth');
-        }
-      } else if (response.statusCode != null && response.statusCode! >= 400 && response.statusCode! < 500) {
-        newStatus = ServiceHealthStatus.degraded;
-        errorMessage = 'HTTP ${response.statusCode}';
-        consecutiveFailures++;
-        Logger.logWarning('${serviceStatus.name} returned ${response.statusCode}', 
-            'health_check_service.dart', 'checkServiceHealth');
-      } else {
-        newStatus = ServiceHealthStatus.down;
-        errorMessage = 'HTTP ${response.statusCode ?? "Unknown"}';
-        consecutiveFailures++;
-        Logger.logError('${serviceStatus.name} is down (${response.statusCode})', 
-            'health_check_service.dart', 'checkServiceHealth');
-      }
-      
-      return serviceStatus.copyWith(
-        status: newStatus,
-        lastChecked: DateTime.now(),
-        lastUpTime: lastUpTime,
-        responseTimeMs: responseTime,
-        errorMessage: errorMessage,
-        consecutiveFailures: consecutiveFailures,
+      return _processHealthCheckResponse(
+        serviceStatus: serviceStatus,
+        response: response,
+        startTime: startTime,
       );
       
     } on DioException catch (e) {
