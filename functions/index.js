@@ -88,7 +88,7 @@ exports.checkServiceHealth = functions.https.onCall(async (data, context) => {
       success: true,
       status: status,
       statusCode: response.status,
-      responseTime: responseTime,
+      responseTimeMs: responseTime,
       errorMessage: errorMessage,
       hasDataFeedIssue: hasDataFeedIssue,
     };
@@ -115,7 +115,7 @@ exports.checkServiceHealth = functions.https.onCall(async (data, context) => {
       success: false,
       status: status,
       statusCode: error.response?.status || null,
-      responseTime: responseTime,
+      responseTimeMs: responseTime,
       errorMessage: errorMessage,
       hasDataFeedIssue: false,
     };
@@ -137,6 +137,7 @@ exports.checkMultipleServices =
 
     // Check all services in parallel
     const checkPromises = services.map((service) => {
+      const startTime = Date.now();
       return axios.get(service.url, {
         timeout: 10000,
         validateStatus: (status) => status < 500,
@@ -145,7 +146,6 @@ exports.checkMultipleServices =
           "User-Agent": "InfinitumDownDetector/1.0",
         },
       }).then((response) => {
-        const startTime = Date.now();
         const endTime = Date.now();
         const responseTime = endTime - startTime;
 
@@ -193,11 +193,14 @@ exports.checkMultipleServices =
           success: true,
           status: status,
           statusCode: response.status,
-          responseTime: responseTime,
+          responseTimeMs: responseTime,
           errorMessage: errorMessage,
           hasDataFeedIssue: hasDataFeedIssue,
         };
       }).catch((error) => {
+        const endTime = Date.now();
+        const responseTime = endTime - startTime;
+        
         let status = "down";
         let errorMessage = "Unknown error";
 
@@ -219,7 +222,7 @@ exports.checkMultipleServices =
           success: false,
           status: status,
           statusCode: error.response?.status || null,
-          responseTime: 0,
+          responseTimeMs: responseTime,
           errorMessage: errorMessage,
           hasDataFeedIssue: false,
         };
@@ -378,64 +381,240 @@ async function parseComponentStatuses(serviceId, components, responseBody, httpS
   // Service-specific parsing
   if (serviceId === "google") {
     // Parse Google Workspace status page
-    // Google status page typically has service names in the HTML
-    // We'll search for service names and check for status indicators
+    // Google status page uses JSON data embedded in the page and HTML status indicators
+    // We need to search more aggressively for service-specific issues
+    
+    // First, try to extract JSON data from the page (Google embeds status data in script tags)
+    let statusData = null;
+    try {
+      // Look for JSON data in script tags
+      const jsonMatch = responseBody.match(/<script[^>]*>[\s\S]*?({[\s\S]*?"status"[^}]*})[\s\S]*?<\/script>/i);
+      if (jsonMatch && jsonMatch[1]) {
+        try {
+          statusData = JSON.parse(jsonMatch[1]);
+        } catch (e) {
+          // Try to find other JSON patterns
+          const jsonPatterns = [
+            /window\.__INITIAL_STATE__\s*=\s*({[\s\S]*?});/i,
+            /"services"\s*:\s*\[([\s\S]*?)\]/i,
+          ];
+          for (const pattern of jsonPatterns) {
+            const match = responseBody.match(pattern);
+            if (match) {
+              try {
+                statusData = JSON.parse(match[1]);
+                break;
+              } catch (e2) {
+                // Continue to next pattern
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // JSON parsing failed, continue with HTML parsing
+      console.warn("Could not parse JSON from Google status page:", e.message);
+    }
+    
+    // Map component names to search patterns
+    const componentSearchMap = {
+      "google docs": ["docs", "google docs"],
+      "google drive": ["drive", "google drive"],
+      "google forms": ["forms", "google forms"],
+      "google sheets": ["sheets", "google sheets"],
+      "google slides": ["slides", "google slides"],
+      "gmail": ["gmail", "mail"],
+      "google calendar": ["calendar", "google calendar"],
+      "apps script": ["apps script", "appscript"],
+      "appsheet": ["appsheet", "app sheet"],
+    };
+    
     for (const comp of components) {
       let compStatus = "unknown";
       let errorMessage = null;
       
-      // Search for the component name in the response
       const compNameLower = comp.name.toLowerCase();
-      const searchPatterns = [
-        compNameLower,
-        compNameLower.replace("google ", ""),
-        compNameLower.replace("google", "").trim(),
-      ];
+      const searchTerms = componentSearchMap[compNameLower] || [compNameLower.replace("google ", "").trim()];
       
-      // Check if component name appears in the page
-      const foundInPage = searchPatterns.some((pattern) =>
-        responseBodyLower.includes(pattern),
-      );
+      // Search for the component in the entire page (not just near the name)
+      let foundIssues = false;
+      let foundOperational = false;
       
-      if (foundInPage) {
-        // Look for status indicators near the component name
-        // Common patterns: "operational", "service disruption", "outage", "degraded"
-        const compIndex = responseBodyLower.indexOf(compNameLower);
-        if (compIndex !== -1) {
-          // Check surrounding text for status indicators
-          const surroundingText = responseBodyLower.substring(
-            Math.max(0, compIndex - 200),
-            Math.min(responseBody.length, compIndex + 200),
-          );
+      // Check for service-specific issues in the entire response
+      for (const searchTerm of searchTerms) {
+        const searchTermLower = searchTerm.toLowerCase();
+        
+        // Find all occurrences of the service name
+        let searchIndex = 0;
+        while ((searchIndex = responseBodyLower.indexOf(searchTermLower, searchIndex)) !== -1) {
+          // Check a larger surrounding context (500 chars before and after)
+          const contextStart = Math.max(0, searchIndex - 500);
+          const contextEnd = Math.min(responseBody.length, searchIndex + 500);
+          const context = responseBodyLower.substring(contextStart, contextEnd);
           
-          if (
-            surroundingText.includes("service disruption") ||
-            surroundingText.includes("outage") ||
-            surroundingText.includes("down")
-          ) {
-            compStatus = "down";
-            errorMessage = "Service disruption reported";
-          } else if (
-            surroundingText.includes("degraded") ||
-            surroundingText.includes("partial") ||
-            surroundingText.includes("issue")
-          ) {
-            compStatus = "degraded";
-            errorMessage = "Service degradation reported";
-          } else if (
-            surroundingText.includes("operational") ||
-            surroundingText.includes("normal") ||
-            surroundingText.includes("available")
-          ) {
-            compStatus = "operational";
+          // Check for DOWN/OUTAGE indicators (highest priority)
+          const downIndicators = [
+            "service disruption",
+            "service outage",
+            "outage",
+            "down",
+            "unavailable",
+            "not available",
+            "currently unavailable",
+            "experiencing issues",
+            "major outage",
+            "partial outage",
+            "incident",
+            "active incident",
+            "ongoing incident",
+            "status: service disruption",
+            "status: outage",
+            "status: down",
+          ];
+          
+          for (const indicator of downIndicators) {
+            if (context.includes(indicator)) {
+              // Verify it's related to this service by checking proximity
+              const indicatorIndex = context.indexOf(indicator);
+              const distance = Math.abs(indicatorIndex - (searchIndex - contextStart));
+              
+              // If indicator is within 300 chars of service name, it's likely related
+              if (distance < 300) {
+                compStatus = "down";
+                errorMessage = "Service disruption or outage reported";
+                foundIssues = true;
+                break;
+              }
+            }
           }
+          
+          if (foundIssues) break;
+          
+          // Check for DEGRADED indicators
+          const degradedIndicators = [
+            "degraded performance",
+            "performance degradation",
+            "degraded",
+            "partial",
+            "partial outage",
+            "partial disruption",
+            "some users",
+            "intermittent",
+            "intermittent issues",
+            "slower than usual",
+            "delayed",
+            "status: degraded",
+            "status: partial",
+          ];
+          
+          for (const indicator of degradedIndicators) {
+            if (context.includes(indicator)) {
+              const indicatorIndex = context.indexOf(indicator);
+              const distance = Math.abs(indicatorIndex - (searchIndex - contextStart));
+              
+              if (distance < 300) {
+                compStatus = "degraded";
+                errorMessage = "Service degradation or partial issues reported";
+                foundIssues = true;
+                break;
+              }
+            }
+          }
+          
+          if (foundIssues) break;
+          
+          // Check for OPERATIONAL indicators (only if no issues found)
+          if (!foundIssues) {
+            const operationalIndicators = [
+              "operational",
+              "all systems operational",
+              "normal",
+              "available",
+              "no issues",
+              "status: operational",
+              "status: normal",
+            ];
+            
+            for (const indicator of operationalIndicators) {
+              if (context.includes(indicator)) {
+                const indicatorIndex = context.indexOf(indicator);
+                const distance = Math.abs(indicatorIndex - (searchIndex - contextStart));
+                
+                if (distance < 300) {
+                  foundOperational = true;
+                  break;
+                }
+              }
+            }
+          }
+          
+          searchIndex += searchTermLower.length;
         }
+        
+        if (foundIssues) break;
       }
       
-      // If we found the component but couldn't determine status, default to operational
-      // (since the page loaded successfully)
-      if (foundInPage && compStatus === "unknown") {
-        compStatus = "operational";
+      // If we found issues, use that status
+      // If we found operational indicators and no issues, mark as operational
+      // Otherwise, check the overall page for any active incidents
+      if (!foundIssues) {
+        if (foundOperational) {
+          compStatus = "operational";
+        } else {
+          // Check if there are any active incidents mentioned on the page
+          // Google often shows active incidents at the top of the page
+          const activeIncidentPatterns = [
+            /active\s+incident/i,
+            /ongoing\s+incident/i,
+            /current\s+incident/i,
+            /service\s+disruption/i,
+            /outage/i,
+          ];
+          
+          let hasActiveIncident = false;
+          for (const pattern of activeIncidentPatterns) {
+            if (pattern.test(responseBodyLower)) {
+              // Check if any of our search terms appear near incident mentions
+              for (const searchTerm of searchTerms) {
+                const searchTermLower = searchTerm.toLowerCase();
+                const incidentMatches = [...responseBodyLower.matchAll(pattern)];
+                for (const match of incidentMatches) {
+                  const incidentIndex = match.index;
+                  // Check if service name appears within 1000 chars of incident
+                  const nearbyText = responseBodyLower.substring(
+                    Math.max(0, incidentIndex - 1000),
+                    Math.min(responseBody.length, incidentIndex + 1000),
+                  );
+                  if (nearbyText.includes(searchTermLower)) {
+                    hasActiveIncident = true;
+                    compStatus = "degraded"; // Default to degraded if incident found
+                    errorMessage = "Active incident or issue reported";
+                    break;
+                  }
+                }
+                if (hasActiveIncident) break;
+              }
+              if (hasActiveIncident) break;
+            }
+          }
+          
+          // If no issues found and no operational indicators, default to unknown
+          // (don't assume operational - let the user see it's unknown)
+          if (!hasActiveIncident && compStatus === "unknown") {
+            // Only default to operational if we can't find the service at all
+            // If we found the service but no status, it's safer to mark as unknown
+            const serviceFound = searchTerms.some((term) =>
+              responseBodyLower.includes(term.toLowerCase()),
+            );
+            if (serviceFound) {
+              // Service found but no clear status - mark as unknown
+              compStatus = "unknown";
+            } else {
+              // Service not found on page - might be operational (page loaded successfully)
+              compStatus = "operational";
+            }
+          }
+        }
       }
       
       componentStatuses.push({
@@ -674,15 +853,46 @@ async function checkSingleService(service, previousStatus = null) {
         responseTimeMs: 0,
       }));
     }
+    
+    // Determine overall service status based on component statuses if components exist
+    // This ensures that if any component has issues, the service status reflects that
+    let finalStatus = status;
+    if (componentStatuses.length > 0) {
+      const hasDown = componentStatuses.some((c) => c.status === "down");
+      const hasDegraded = componentStatuses.some((c) => c.status === "degraded");
+      const allOperational = componentStatuses.every((c) => c.status === "operational");
+      
+      if (hasDown) {
+        finalStatus = "down";
+        // Update error message if not already set
+        if (!errorMessage) {
+          const downComponents = componentStatuses.filter((c) => c.status === "down");
+          errorMessage = `${downComponents.length} component(s) down: ${downComponents.map((c) => c.name).join(", ")}`;
+        }
+      } else if (hasDegraded) {
+        finalStatus = "degraded";
+        // Update error message if not already set
+        if (!errorMessage) {
+          const degradedComponents = componentStatuses.filter((c) => c.status === "degraded");
+          errorMessage = `${degradedComponents.length} component(s) degraded: ${degradedComponents.map((c) => c.name).join(", ")}`;
+        }
+      } else if (allOperational) {
+        finalStatus = "operational";
+        // Clear error message if all components are operational
+        errorMessage = null;
+      }
+      // If components have mixed status (some unknown, some operational), use the worse status
+      // or keep the current status if it's worse than operational
+    }
 
     return {
       id: service.id,
       name: service.name,
       url: service.url,
       type: service.type,
-      status: status,
+      status: finalStatus,
       statusCode: response.status,
-      responseTime: responseTime,
+      responseTimeMs: responseTime,
       errorMessage: errorMessage,
       lastChecked: admin.firestore.FieldValue.serverTimestamp(),
       lastUpTime: lastUpTime,
@@ -756,7 +966,7 @@ async function checkSingleService(service, previousStatus = null) {
       type: service.type,
       status: status,
       statusCode: error.response?.status || null,
-      responseTime: responseTime,
+      responseTimeMs: responseTime,
       errorMessage: errorMessage,
       lastChecked: admin.firestore.FieldValue.serverTimestamp(),
       lastUpTime: lastUpTime,
@@ -767,10 +977,10 @@ async function checkSingleService(service, previousStatus = null) {
 }
 
 // MARK: - Scheduled Health Check Function
-// Runs every 60 seconds to check all services and update Firestore
+// Runs every 1 minute to check all services and update Firestore
 // This ensures all users see the same status (server-side checks)
 // Optimized for Firebase free tier limits:
-// - 2M invocations/month (43,200/month at 60s interval = 2.16% usage)
+// - 2M invocations/month (43,200/month at 1min interval = 2.16% usage)
 // - 400K GB-seconds/month (estimated ~22K/month = 5.5% usage)
 // - 200K CPU-seconds/month (estimated ~86K/month = 43% usage)
 exports.scheduledHealthCheck = functions
