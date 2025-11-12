@@ -14,6 +14,7 @@ import '../services/third_party_status_service.dart';
 import '../services/status_cache_service.dart';
 import '../core/config.dart';
 import '../core/logger.dart';
+import '../models/service_component.dart';
 
 // MARK: - Service Status Provider
 // Manages the state of all monitored services and coordinates health checks
@@ -172,24 +173,28 @@ class ServiceStatusProvider with ChangeNotifier {
         name: 'iView/InfiniView',
         url: 'https://view.infinitumlive.com/',
         type: ServiceType.infinitum,
+        components: ServiceComponentDefinitions.getComponentsForService('infinitum-view'),
       ),
       ServiceStatus.initial(
         id: 'infinitum-live',
         name: 'Infinitum Live',
         url: 'https://infinitumlive.com/',
         type: ServiceType.infinitum,
+        components: ServiceComponentDefinitions.getComponentsForService('infinitum-live'),
       ),
       ServiceStatus.initial(
         id: 'infinitum-crm',
         name: 'Infinitum CRM',
         url: 'https://crm.infinitumlive.com/',
         type: ServiceType.infinitum,
+        components: ServiceComponentDefinitions.getComponentsForService('infinitum-crm'),
       ),
       ServiceStatus.initial(
         id: 'infinitum-onboarding',
         name: 'Onboarding',
         url: 'https://infinitum-onboarding.web.app/',
         type: ServiceType.infinitum,
+        components: ServiceComponentDefinitions.getComponentsForService('infinitum-onboarding'),
       ),
       ServiceStatus.initial(
         id: 'infinitum-board',
@@ -256,126 +261,64 @@ class ServiceStatusProvider with ChangeNotifier {
   
   // MARK: - Health Check Methods
   /// Performs health checks on all services
+  /// NOTE: Health checks are now performed server-side by scheduled Firebase Function
+  /// This method is kept for manual refresh capability but primarily relies on Firestore updates
   /// Returns void, notifies listeners when complete
   Future<void> checkAllServices() async {
-    if (_isChecking) {
-      Logger.logWarning('Health check already in progress', 'service_status_provider.dart', 'checkAllServices');
-      return;
-    }
+    // Health checks are now performed server-side by scheduled Firebase Function
+    // The real-time listener will automatically update the UI when Firestore is updated
+    // This method is kept for compatibility but does not perform client-side checks
+    Logger.logInfo('Health checks are performed server-side. Reading from Firestore cache.', 
+        'service_status_provider.dart', 'checkAllServices');
     
-    _isChecking = true;
+    // Reload from cache to get latest server-side results
+    await _loadFromCache();
     notifyListeners();
-    
-    try {
-      Logger.logInfo('Starting health checks for all services', 'service_status_provider.dart', 'checkAllServices');
-      
-      // Check Infinitum services
-      final infinitumResults = await _healthCheckService.checkMultipleServices(_infinitumServices);
-      _infinitumServices = infinitumResults;
-      
-      // Check third-party services
-      final thirdPartyResults = await _thirdPartyStatusService.checkAllThirdPartyServices();
-      _thirdPartyServices = thirdPartyResults;
-      
-      _lastCheckTime = DateTime.now();
-      
-      // Save to cache after successful checks
-      await _saveToCache();
-      
-      Logger.logInfo('Health checks completed. Operational: $operationalCount, Issues: $issuesCount', 
-          'service_status_provider.dart', 'checkAllServices');
-      
-    } catch (e) {
-      Logger.logError('Error during health checks', 'service_status_provider.dart', 'checkAllServices', e);
-    } finally {
-      _isChecking = false;
-      notifyListeners();
-    }
   }
   
   /// Performs a health check on a single service
-  /// [serviceId] - ID of the service to check
+  /// NOTE: Health checks are now performed server-side by scheduled Firebase Function
+  /// This method reloads the service from Firestore cache
+  /// [serviceId] - ID of the service to refresh
   /// Returns void, notifies listeners when complete
   Future<void> checkService(String serviceId) async {
-    try {
-      final allServices = [..._infinitumServices, ..._thirdPartyServices];
-      final serviceIndex = allServices.indexWhere((s) => s.id == serviceId);
-      
-      if (serviceIndex == -1) {
-        Logger.logWarning('Service not found: $serviceId', 'service_status_provider.dart', 'checkService');
-        return;
-      }
-      
-      final service = allServices[serviceIndex];
-      ServiceStatus updatedService;
-      
-      if (service.type == ServiceType.infinitum) {
-        updatedService = await _healthCheckService.checkServiceHealth(service);
-        final index = _infinitumServices.indexWhere((s) => s.id == serviceId);
-        if (index != -1) {
-          _infinitumServices[index] = updatedService;
-        }
-      } else {
-        // For third-party services, we need to check which one it is
-        if (serviceId == 'firebase') {
-          updatedService = await _thirdPartyStatusService.checkFirebaseStatus();
-        } else if (serviceId == 'google') {
-          updatedService = await _thirdPartyStatusService.checkGoogleStatus();
-        } else if (serviceId == 'apple') {
-          updatedService = await _thirdPartyStatusService.checkAppleStatus();
-        } else if (serviceId == 'discord') {
-          updatedService = await _thirdPartyStatusService.checkDiscordStatus();
-        } else if (serviceId == 'tiktok') {
-          updatedService = await _thirdPartyStatusService.checkTikTokStatus();
-        } else if (serviceId == 'aws') {
-          updatedService = await _thirdPartyStatusService.checkAWSStatus();
-        } else {
-          return;
-        }
-        
-        final index = _thirdPartyServices.indexWhere((s) => s.id == serviceId);
-        if (index != -1) {
-          _thirdPartyServices[index] = updatedService;
-        }
-      }
-      
-      _lastCheckTime = DateTime.now();
-      
-      // Save to cache after successful check
-      await _saveToCache();
-      
-      notifyListeners();
-      
-    } catch (e) {
-      Logger.logError('Error checking service: $serviceId', 'service_status_provider.dart', 'checkService', e);
-    }
+    // Health checks are now performed server-side
+    // Just reload from cache to get latest server-side results
+    Logger.logInfo('Health checks are server-side. Reloading service $serviceId from Firestore cache.', 
+        'service_status_provider.dart', 'checkService');
+    
+    await _loadFromCache();
+    notifyListeners();
   }
   
   // MARK: - Periodic Checking
   /// Starts periodic health checks
-  /// [intervalSeconds] - Interval between checks in seconds
+  /// NOTE: Health checks are now performed server-side by scheduled Firebase Function
+  /// This method is kept for compatibility but does not start client-side checks
+  /// The real-time listener automatically updates the UI when Firestore is updated
+  /// [intervalSeconds] - Interval between checks in seconds (ignored, server handles this)
   /// Returns void
   void startPeriodicChecks({int intervalSeconds = DEFAULT_HEALTH_CHECK_INTERVAL}) {
     stopPeriodicChecks();
     
-    Logger.logInfo('Starting periodic health checks (interval: ${intervalSeconds}s)', 
+    Logger.logInfo('Health checks are performed server-side by scheduled Firebase Function. Real-time listener is active.', 
         'service_status_provider.dart', 'startPeriodicChecks');
     
-    _periodicCheckTimer = Timer.periodic(
-      Duration(seconds: intervalSeconds),
-      (_) => checkAllServices(),
-    );
+    // No need for client-side periodic checks - server handles this
+    // Real-time listener will automatically update UI when Firestore is updated
     
-    // Perform initial check
-    checkAllServices();
+    // Load initial data from cache
+    _loadFromCache();
   }
   
   /// Stops periodic health checks
+  /// NOTE: This is kept for compatibility but has no effect since checks are server-side
   /// Returns void
   void stopPeriodicChecks() {
     _periodicCheckTimer?.cancel();
     _periodicCheckTimer = null;
-    Logger.logInfo('Stopped periodic health checks', 'service_status_provider.dart', 'stopPeriodicChecks');
+    Logger.logInfo('Periodic checks are server-side. Real-time listener remains active.', 
+        'service_status_provider.dart', 'stopPeriodicChecks');
   }
   
   // MARK: - Cleanup

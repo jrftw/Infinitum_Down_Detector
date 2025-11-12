@@ -2,8 +2,10 @@
 // Purpose: Data models for service status information
 // Author: Kevin Doyle Jr. / Infinitum Imagery LLC
 // Last Modified: 2025-01-27
-// Dependencies: None
+// Dependencies: service_component.dart
 // Platform Compatibility: Web, iOS, Android
+
+import 'service_component.dart';
 
 // MARK: - Service Status Model
 // Represents the status of a monitored service
@@ -18,6 +20,7 @@ class ServiceStatus {
   final int responseTimeMs;
   final String? errorMessage;
   final int consecutiveFailures;
+  final List<ServiceComponent> components;
 
   ServiceStatus({
     required this.id,
@@ -30,6 +33,7 @@ class ServiceStatus {
     this.responseTimeMs = 0,
     this.errorMessage,
     this.consecutiveFailures = 0,
+    this.components = const [],
   });
 
   // MARK: - Factory Constructors
@@ -39,6 +43,7 @@ class ServiceStatus {
     required String name,
     required String url,
     required ServiceType type,
+    List<ServiceComponent>? components,
   }) {
     return ServiceStatus(
       id: id,
@@ -47,6 +52,7 @@ class ServiceStatus {
       type: type,
       status: ServiceHealthStatus.unknown,
       lastChecked: DateTime.now(),
+      components: components ?? [],
     );
   }
 
@@ -63,6 +69,7 @@ class ServiceStatus {
     int? responseTimeMs,
     String? errorMessage,
     int? consecutiveFailures,
+    List<ServiceComponent>? components,
   }) {
     return ServiceStatus(
       id: id ?? this.id,
@@ -75,6 +82,7 @@ class ServiceStatus {
       responseTimeMs: responseTimeMs ?? this.responseTimeMs,
       errorMessage: errorMessage ?? this.errorMessage,
       consecutiveFailures: consecutiveFailures ?? this.consecutiveFailures,
+      components: components ?? this.components,
     );
   }
 
@@ -98,6 +106,41 @@ class ServiceStatus {
         return 0xFF6B7280; // Gray
     }
   }
+
+  // Gets overall status based on component statuses if available
+  // If components exist, determines status from component health
+  ServiceHealthStatus get overallStatus {
+    if (components.isEmpty) {
+      return status;
+    }
+    
+    // Check if any component is down
+    final hasDown = components.any((c) => c.status == ServiceHealthStatus.down);
+    if (hasDown) {
+      return ServiceHealthStatus.down;
+    }
+    
+    // Check if any component is degraded
+    final hasDegraded = components.any((c) => c.status == ServiceHealthStatus.degraded);
+    if (hasDegraded) {
+      return ServiceHealthStatus.degraded;
+    }
+    
+    // Check if all components are operational
+    final allOperational = components.every((c) => c.status == ServiceHealthStatus.operational);
+    if (allOperational) {
+      return ServiceHealthStatus.operational;
+    }
+    
+    // Default to unknown if components have unknown status
+    return ServiceHealthStatus.unknown;
+  }
+
+  // Gets count of operational components
+  int get operationalComponentsCount => components.where((c) => c.isOperational).length;
+
+  // Gets count of components with issues
+  int get componentsWithIssuesCount => components.where((c) => c.hasIssues).length;
 }
 
 // MARK: - Service Health Status Enum

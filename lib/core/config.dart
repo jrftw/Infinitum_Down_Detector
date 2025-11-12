@@ -2,8 +2,10 @@
 // Purpose: Global configuration constants and flags for the application
 // Author: Kevin Doyle Jr. / Infinitum Imagery LLC
 // Last Modified: 2025-01-27
-// Dependencies: None
+// Dependencies: models/service_component.dart
 // Platform Compatibility: Web, iOS, Android
+
+import '../models/service_component.dart';
 
 // MARK: - Global Configuration
 // Centralized configuration constants
@@ -40,6 +42,87 @@ class ServiceUrls {
   static const String infinitumBoard = 'https://iboard.duckdns.org/';
   static const String infinitumBoard2 = 'https://iboard2--infinitum-dashboard.us-east4.hosted.app/';
   static const String infinitumImagery = 'https://www.infinitumimagery.com/';
+}
+
+// MARK: - Service Component Definitions
+// Defines components/endpoints to monitor for each service
+class ServiceComponentDefinitions {
+  // Gets components for a specific service
+  // [serviceId] - The service ID to get components for
+  // Returns list of ServiceComponent definitions
+  static List<ServiceComponent> getComponentsForService(String serviceId) {
+    switch (serviceId) {
+      case 'infinitum-view':
+        return [
+          ServiceComponent.initial(
+            id: 'infinitum-view-main',
+            name: 'Main Page',
+            url: 'https://view.infinitumlive.com/',
+            type: ComponentType.main,
+          ),
+          // Add auth endpoint if available
+          ServiceComponent.initial(
+            id: 'infinitum-view-api',
+            name: 'API',
+            url: 'https://view.infinitumlive.com/api/health',
+            type: ComponentType.api,
+          ),
+        ];
+      
+      case 'infinitum-live':
+        return [
+          ServiceComponent.initial(
+            id: 'infinitum-live-main',
+            name: 'Main Page',
+            url: 'https://infinitumlive.com/',
+            type: ComponentType.main,
+          ),
+          ServiceComponent.initial(
+            id: 'infinitum-live-auth',
+            name: 'Auth',
+            url: 'https://infinitumlive.com/auth',
+            type: ComponentType.auth,
+          ),
+        ];
+      
+      case 'infinitum-crm':
+        return [
+          ServiceComponent.initial(
+            id: 'infinitum-crm-main',
+            name: 'Main Page',
+            url: 'https://crm.infinitumlive.com/',
+            type: ComponentType.main,
+          ),
+          ServiceComponent.initial(
+            id: 'infinitum-crm-api',
+            name: 'API',
+            url: 'https://crm.infinitumlive.com/api/v1/status',
+            type: ComponentType.api,
+          ),
+        ];
+      
+      case 'infinitum-onboarding':
+        return [
+          ServiceComponent.initial(
+            id: 'infinitum-onboarding-main',
+            name: 'Main Page',
+            url: 'https://infinitum-onboarding.web.app/',
+            type: ComponentType.main,
+          ),
+          ServiceComponent.initial(
+            id: 'infinitum-onboarding-auth',
+            name: 'Auth',
+            url: 'https://infinitum-onboarding.web.app/auth',
+            type: ComponentType.auth,
+          ),
+        ];
+      
+      default:
+        // For services without specific component definitions, return empty list
+        // The main URL will still be checked as part of the service status
+        return [];
+    }
+  }
 }
 
 // MARK: - Third-Party Service Status URLs

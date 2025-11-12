@@ -8,6 +8,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/service_status.dart';
+import '../models/service_component.dart';
 import '../core/config.dart';
 import '../core/responsive.dart';
 
@@ -17,16 +18,12 @@ class ServiceStatusCard extends StatelessWidget {
   final ServiceStatus service;
   final VoidCallback? onTap;
   final VoidCallback? onReport;
-  final VoidCallback? onRecheck;
-  final bool isChecking;
 
   const ServiceStatusCard({
     super.key,
     required this.service,
     this.onTap,
     this.onReport,
-    this.onRecheck,
-    this.isChecking = false,
   });
 
   // MARK: - UI Build Methods
@@ -228,25 +225,6 @@ class ServiceStatusCard extends StatelessWidget {
                                 spacing: 8,
                                 runSpacing: 8,
                                 children: [
-                                  if (onRecheck != null)
-                                    _buildActionButton(
-                                      context,
-                                      icon: isChecking 
-                                          ? SizedBox(
-                                              width: 16,
-                                              height: 16,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                valueColor: AlwaysStoppedAnimation<Color>(
-                                                  Theme.of(context).colorScheme.primary,
-                                                ),
-                                              ),
-                                            )
-                                          : Icon(Icons.refresh, size: 16, color: Theme.of(context).colorScheme.primary),
-                                      label: 'Re-Run',
-                                      onPressed: isChecking ? null : onRecheck,
-                                      color: Theme.of(context).colorScheme.primary,
-                                    ),
                                   if (onReport != null)
                                     _buildActionButton(
                                       context,
@@ -291,27 +269,6 @@ class ServiceStatusCard extends StatelessWidget {
                               ),
                               const Spacer(),
                               // Action buttons
-                              if (onRecheck != null)
-                                _buildActionButton(
-                                  context,
-                                  icon: isChecking 
-                                      ? SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            valueColor: AlwaysStoppedAnimation<Color>(
-                                              Theme.of(context).colorScheme.primary,
-                                            ),
-                                          ),
-                                        )
-                                      : Icon(Icons.refresh, size: 16, color: Theme.of(context).colorScheme.primary),
-                                  label: 'Re-Run',
-                                  onPressed: isChecking ? null : onRecheck,
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                              if (onRecheck != null && onReport != null)
-                                const SizedBox(width: 6),
                               if (onReport != null)
                                 _buildActionButton(
                                   context,
@@ -325,6 +282,87 @@ class ServiceStatusCard extends StatelessWidget {
                   );
                 },
               ),
+              // Component status summary if available
+              if (service.components.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+                      width: 1,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.widgets,
+                            size: 14,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Components (${service.operationalComponentsCount}/${service.components.length})',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: service.components.map((component) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Color(component.statusColor).withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: Color(component.statusColor).withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  decoration: BoxDecoration(
+                                    color: Color(component.statusColor),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  component.typeIcon,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  component.name,
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               // Error message if present
               if (service.errorMessage != null) ...[
                 const SizedBox(height: 10),

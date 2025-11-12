@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import '../core/config.dart';
 import '../core/logger.dart';
 import '../models/service_status.dart';
+import '../models/service_component.dart';
 
 // MARK: - Health Check Service
 // Handles HTTP health checks for monitored services
@@ -139,10 +140,20 @@ class HealthCheckService {
   /// Performs a health check on a single service
   /// On web, uses CORS proxy to bypass CORS restrictions
   /// On mobile, uses direct HTTP requests
+  /// Also checks service components if they exist
   /// [serviceStatus] - The current service status to check
   /// Returns updated ServiceStatus with latest health information
   Future<ServiceStatus> checkServiceHealth(ServiceStatus serviceStatus) async {
     final startTime = DateTime.now();
+    
+    // MARK: - Check Components First
+    // If service has components, check them first
+    List<ServiceComponent> updatedComponents = [];
+    if (serviceStatus.components.isNotEmpty) {
+      Logger.logInfo('Checking ${serviceStatus.components.length} components for ${serviceStatus.name}', 
+          'health_check_service.dart', 'checkServiceHealth');
+      updatedComponents = await checkMultipleComponents(serviceStatus.components);
+    }
     
     // MARK: - Web Platform: Use CORS Proxy
     // On web, always use CORS proxy for external domains to avoid CORS issues
@@ -172,11 +183,12 @@ class HealthCheckService {
           // We check if we got actual content back
           if (proxyResponse.data != null && proxyResponse.data.toString().isNotEmpty) {
             proxySuccess = true;
-            return _processHealthCheckResponse(
+            final mainResult = _processHealthCheckResponse(
               serviceStatus: serviceStatus,
               response: proxyResponse,
               startTime: startTime,
             );
+            return _combineServiceAndComponentStatus(mainResult, updatedComponents);
           }
         } on DioException catch (e) {
           Logger.logDebug('Primary CORS proxy failed for ${serviceStatus.name}, trying fallback', 
@@ -199,11 +211,12 @@ class HealthCheckService {
             
             if (proxyResponse.data != null && proxyResponse.data.toString().isNotEmpty) {
               proxySuccess = true;
-              return _processHealthCheckResponse(
+              final mainResult = _processHealthCheckResponse(
                 serviceStatus: serviceStatus,
                 response: proxyResponse,
                 startTime: startTime,
               );
+              return _combineServiceAndComponentStatus(mainResult, updatedComponents);
             }
           } on DioException catch (e) {
             Logger.logDebug('Fallback CORS proxy failed for ${serviceStatus.name}, trying direct request', 
@@ -223,11 +236,12 @@ class HealthCheckService {
             ),
           );
           
-          return _processHealthCheckResponse(
+          final mainResult = _processHealthCheckResponse(
             serviceStatus: serviceStatus,
             response: response,
             startTime: startTime,
           );
+          return _combineServiceAndComponentStatus(mainResult, updatedComponents);
         } catch (directError) {
           // All methods failed
           final endTime = DateTime.now();
@@ -252,13 +266,15 @@ class HealthCheckService {
           Logger.logError('Error checking ${serviceStatus.name} on web: $errorMsg', 
               'health_check_service.dart', 'checkServiceHealth', directError);
           
-          return serviceStatus.copyWith(
+          final errorResult = serviceStatus.copyWith(
             status: newStatus,
             lastChecked: DateTime.now(),
             responseTimeMs: responseTime,
             errorMessage: errorMsg,
             consecutiveFailures: serviceStatus.consecutiveFailures + 1,
+            components: updatedComponents,
           );
+          return _combineServiceAndComponentStatus(errorResult, updatedComponents);
         }
       } catch (e) {
         final endTime = DateTime.now();
@@ -267,18 +283,21 @@ class HealthCheckService {
         Logger.logError('Unexpected error checking ${serviceStatus.name} on web', 
             'health_check_service.dart', 'checkServiceHealth', e);
         
-        return serviceStatus.copyWith(
+        final errorResult = serviceStatus.copyWith(
           status: ServiceHealthStatus.unknown,
           lastChecked: DateTime.now(),
           responseTimeMs: responseTime,
           errorMessage: 'Error: ${e.toString()}',
           consecutiveFailures: serviceStatus.consecutiveFailures + 1,
+          components: updatedComponents,
         );
+        return _combineServiceAndComponentStatus(errorResult, updatedComponents);
       }
     }
     
     // MARK: - Mobile Platform: Use Direct HTTP
     // On mobile (iOS/Android), use direct HTTP requests (no CORS restrictions)
+    ServiceStatus mainServiceResult;
     try {
       Logger.logDebug('Checking health for ${serviceStatus.name} (${serviceStatus.url})', 
           'health_check_service.dart', 'checkServiceHealth');
@@ -293,7 +312,7 @@ class HealthCheckService {
         ),
       );
       
-      return _processHealthCheckResponse(
+      mainServiceResult = _processHealthCheckResponse(
         serviceStatus: serviceStatus,
         response: response,
         startTime: startTime,
@@ -321,7 +340,7 @@ class HealthCheckService {
       Logger.logError('Health check failed for ${serviceStatus.name}: $errorMsg', 
           'health_check_service.dart', 'checkServiceHealth', e);
       
-      return serviceStatus.copyWith(
+      mainServiceResult = serviceStatus.copyWith(
         status: newStatus,
         lastChecked: DateTime.now(),
         responseTimeMs: responseTime,
@@ -336,7 +355,7 @@ class HealthCheckService {
       Logger.logError('Unexpected error checking ${serviceStatus.name}', 
           'health_check_service.dart', 'checkServiceHealth', e);
       
-      return serviceStatus.copyWith(
+      mainServiceResult = serviceStatus.copyWith(
         status: ServiceHealthStatus.unknown,
         lastChecked: DateTime.now(),
         responseTimeMs: responseTime,
@@ -344,6 +363,43 @@ class HealthCheckService {
         consecutiveFailures: serviceStatus.consecutiveFailures + 1,
       );
     }
+    
+    // Combine main service result with component results
+    return _combineServiceAndComponentStatus(mainServiceResult, updatedComponents);
+  }
+
+  // MARK: - Helper Method: Combine Service and Component Status
+  // Combines main service status with component statuses to determine overall status
+  ServiceStatus _combineServiceAndComponentStatus(
+    ServiceStatus serviceResult,
+    List<ServiceComponent> components,
+  ) {
+    // If no components, return service result as-is
+    if (components.isEmpty) {
+      return serviceResult;
+    }
+    
+    // Determine overall status from components
+    final hasDown = components.any((c) => c.status == ServiceHealthStatus.down);
+    final hasDegraded = components.any((c) => c.status == ServiceHealthStatus.degraded);
+    final allOperational = components.every((c) => c.status == ServiceHealthStatus.operational);
+    
+    ServiceHealthStatus finalStatus;
+    if (hasDown) {
+      finalStatus = ServiceHealthStatus.down;
+    } else if (hasDegraded) {
+      finalStatus = ServiceHealthStatus.degraded;
+    } else if (allOperational) {
+      finalStatus = ServiceHealthStatus.operational;
+    } else {
+      // If components have mixed status, use the worse of service status or component status
+      finalStatus = serviceResult.status;
+    }
+    
+    return serviceResult.copyWith(
+      status: finalStatus,
+      components: components,
+    );
   }
   
   /// Performs health checks on multiple services concurrently
@@ -358,6 +414,204 @@ class HealthCheckService {
     
     Logger.logInfo('Completed health checks for ${services.length} services', 
         'health_check_service.dart', 'checkMultipleServices');
+    
+    return results;
+  }
+
+  // MARK: - Component Health Check Methods
+  /// Performs a health check on a single component/endpoint
+  /// [component] - The component to check
+  /// Returns updated ServiceComponent with latest health information
+  Future<ServiceComponent> checkComponentHealth(ServiceComponent component) async {
+    final startTime = DateTime.now();
+    
+    // MARK: - Web Platform: Use CORS Proxy
+    if (kIsWeb) {
+      try {
+        Logger.logDebug('Checking component health for ${component.name} (${component.url})', 
+            'health_check_service.dart', 'checkComponentHealth');
+        
+        Response? proxyResponse;
+        bool proxySuccess = false;
+        
+        try {
+          final primaryProxyUrl = '$CORS_PROXY_URL${Uri.encodeComponent(component.url)}';
+          proxyResponse = await _dio.get(
+            primaryProxyUrl,
+            options: Options(
+              validateStatus: (status) => status != null && status < 500,
+              followRedirects: true,
+              maxRedirects: 5,
+              responseType: ResponseType.plain,
+            ),
+          );
+          
+          if (proxyResponse.data != null && proxyResponse.data.toString().isNotEmpty) {
+            proxySuccess = true;
+            return _processComponentResponse(component: component, response: proxyResponse, startTime: startTime);
+          }
+        } on DioException catch (e) {
+          Logger.logDebug('Primary CORS proxy failed for ${component.name}, trying fallback', 
+              'health_check_service.dart', 'checkComponentHealth');
+        }
+        
+        if (!proxySuccess) {
+          try {
+            final fallbackProxyUrl = '$CORS_PROXY_FALLBACK_URL${Uri.encodeComponent(component.url)}';
+            proxyResponse = await _dio.get(
+              fallbackProxyUrl,
+              options: Options(
+                validateStatus: (status) => status != null && status < 500,
+                followRedirects: true,
+                maxRedirects: 5,
+                responseType: ResponseType.plain,
+              ),
+            );
+            
+            if (proxyResponse.data != null && proxyResponse.data.toString().isNotEmpty) {
+              proxySuccess = true;
+              return _processComponentResponse(component: component, response: proxyResponse, startTime: startTime);
+            }
+          } on DioException catch (e) {
+            Logger.logDebug('Fallback CORS proxy failed for ${component.name}, trying direct request', 
+                'health_check_service.dart', 'checkComponentHealth');
+          }
+        }
+        
+        // Try direct request as last resort
+        try {
+          final response = await _dio.get(
+            component.url,
+            options: Options(
+              validateStatus: (status) => status != null && status < 500,
+              followRedirects: true,
+              maxRedirects: 5,
+              responseType: ResponseType.plain,
+            ),
+          );
+          
+          return _processComponentResponse(component: component, response: response, startTime: startTime);
+        } catch (directError) {
+          return _handleComponentError(component: component, error: directError, startTime: startTime);
+        }
+      } catch (e) {
+        return _handleComponentError(component: component, error: e, startTime: startTime);
+      }
+    }
+    
+    // MARK: - Mobile Platform: Use Direct HTTP
+    try {
+      Logger.logDebug('Checking component health for ${component.name} (${component.url})', 
+          'health_check_service.dart', 'checkComponentHealth');
+      
+      final response = await _dio.get(
+        component.url,
+        options: Options(
+          validateStatus: (status) => status != null && status < 500,
+          followRedirects: true,
+          maxRedirects: 5,
+          responseType: ResponseType.plain,
+        ),
+      );
+      
+      return _processComponentResponse(component: component, response: response, startTime: startTime);
+      
+    } catch (e) {
+      return _handleComponentError(component: component, error: e, startTime: startTime);
+    }
+  }
+
+  // MARK: - Helper Method: Process Component Response
+  // Processes HTTP response for a component and returns updated ServiceComponent
+  ServiceComponent _processComponentResponse({
+    required ServiceComponent component,
+    required Response response,
+    required DateTime startTime,
+  }) {
+    final endTime = DateTime.now();
+    final responseTime = endTime.difference(startTime).inMilliseconds;
+    
+    ServiceHealthStatus newStatus;
+    String? errorMessage;
+    
+    if (response.statusCode != null && response.statusCode! >= 200 && response.statusCode! < 400) {
+      newStatus = ServiceHealthStatus.operational;
+      Logger.logInfo('${component.name} is operational (${response.statusCode})', 
+          'health_check_service.dart', '_processComponentResponse');
+    } else if (response.statusCode != null && response.statusCode! >= 400 && response.statusCode! < 500) {
+      newStatus = ServiceHealthStatus.degraded;
+      errorMessage = 'HTTP ${response.statusCode}';
+      Logger.logWarning('${component.name} returned ${response.statusCode}', 
+          'health_check_service.dart', '_processComponentResponse');
+    } else {
+      newStatus = ServiceHealthStatus.down;
+      errorMessage = 'HTTP ${response.statusCode ?? "Unknown"}';
+      Logger.logError('${component.name} is down (${response.statusCode})', 
+          'health_check_service.dart', '_processComponentResponse');
+    }
+    
+    return component.copyWith(
+      status: newStatus,
+      lastChecked: DateTime.now(),
+      responseTimeMs: responseTime,
+      errorMessage: errorMessage,
+      statusCode: response.statusCode,
+    );
+  }
+
+  // MARK: - Helper Method: Handle Component Error
+  // Handles errors during component health checks
+  ServiceComponent _handleComponentError({
+    required ServiceComponent component,
+    required dynamic error,
+    required DateTime startTime,
+  }) {
+    final endTime = DateTime.now();
+    final responseTime = endTime.difference(startTime).inMilliseconds;
+    
+    String errorMsg;
+    ServiceHealthStatus newStatus;
+    
+    if (error is DioException) {
+      if (error.type == DioExceptionType.connectionTimeout || 
+          error.type == DioExceptionType.receiveTimeout) {
+        errorMsg = 'Connection timeout';
+        newStatus = ServiceHealthStatus.down;
+      } else if (error.type == DioExceptionType.connectionError) {
+        errorMsg = kIsWeb ? 'Connection error (CORS blocked)' : 'Connection error';
+        newStatus = kIsWeb ? ServiceHealthStatus.unknown : ServiceHealthStatus.down;
+      } else {
+        errorMsg = error.message ?? 'Unknown error';
+        newStatus = ServiceHealthStatus.degraded;
+      }
+    } else {
+      errorMsg = 'Unexpected error: ${error.toString()}';
+      newStatus = ServiceHealthStatus.unknown;
+    }
+    
+    Logger.logError('Error checking ${component.name}: $errorMsg', 
+        'health_check_service.dart', '_handleComponentError', error);
+    
+    return component.copyWith(
+      status: newStatus,
+      lastChecked: DateTime.now(),
+      responseTimeMs: responseTime,
+      errorMessage: errorMsg,
+    );
+  }
+
+  /// Performs health checks on multiple components concurrently
+  /// [components] - List of components to check
+  /// Returns list of updated ServiceComponent objects
+  Future<List<ServiceComponent>> checkMultipleComponents(List<ServiceComponent> components) async {
+    Logger.logInfo('Checking ${components.length} components', 
+        'health_check_service.dart', 'checkMultipleComponents');
+    
+    final futures = components.map((component) => checkComponentHealth(component));
+    final results = await Future.wait(futures);
+    
+    Logger.logInfo('Completed health checks for ${components.length} components', 
+        'health_check_service.dart', 'checkMultipleComponents');
     
     return results;
   }

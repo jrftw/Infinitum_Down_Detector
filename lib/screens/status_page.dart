@@ -10,7 +10,6 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../providers/service_status_provider.dart';
 import '../models/service_status.dart';
-import '../core/logger.dart';
 import '../core/version.dart';
 import '../core/config.dart';
 import '../widgets/service_status_card.dart';
@@ -28,7 +27,6 @@ class StatusPage extends StatefulWidget {
 }
 
 class _StatusPageState extends State<StatusPage> {
-  final Set<String> _checkingServices = {};
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String _sortBy = 'name'; // 'name', 'status', 'responseTime'
@@ -42,42 +40,14 @@ class _StatusPageState extends State<StatusPage> {
         _searchQuery = _searchController.text.toLowerCase();
       });
     });
-    // Start periodic health checks when page loads
+    // Health checks are performed server-side by scheduled Firebase Function
+    // Real-time listener will automatically update the UI when Firestore is updated
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = Provider.of<ServiceStatusProvider>(context, listen: false);
       provider.startPeriodicChecks();
-      // Perform initial check
-      provider.checkAllServices();
     });
   }
   
-  // MARK: - Service Check Methods
-  /// Handles re-running health check for a single service
-  /// [serviceId] - ID of the service to check
-  /// Returns void
-  Future<void> _recheckService(String serviceId) async {
-    if (_checkingServices.contains(serviceId)) return;
-    
-    setState(() {
-      _checkingServices.add(serviceId);
-    });
-    
-    try {
-      final provider = Provider.of<ServiceStatusProvider>(context, listen: false);
-      await provider.checkService(serviceId);
-      Logger.logInfo('Manual recheck completed for service: $serviceId', 
-          'status_page.dart', '_recheckService');
-    } catch (e) {
-      Logger.logError('Error rechecking service: $serviceId', 
-          'status_page.dart', '_recheckService', e);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _checkingServices.remove(serviceId);
-        });
-      }
-    }
-  }
 
   @override
   void dispose() {
@@ -243,27 +213,6 @@ class _StatusPageState extends State<StatusPage> {
                 onPressed: () => _showVersionDialog(context),
                 tooltip: 'Version Info',
               ),
-              // Refresh button
-              Consumer<ServiceStatusProvider>(
-                builder: (context, provider, _) {
-                  return IconButton(
-                    icon: provider.isChecking
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.refresh),
-                    onPressed: provider.isChecking
-                        ? null
-                        : () {
-                            provider.checkAllServices();
-                            Logger.logInfo('Manual refresh triggered', 'status_page.dart', 'build');
-                          },
-                    tooltip: 'Refresh Status',
-                  );
-                },
-              ),
             ],
           ),
           
@@ -392,8 +341,6 @@ class _StatusPageState extends State<StatusPage> {
                               service: service,
                               onTap: () => _showServiceDetails(context, service),
                               onReport: () => _showReportDialog(context, service),
-                              onRecheck: () => _recheckService(service.id),
-                              isChecking: _checkingServices.contains(service.id),
                             ),
                           );
                         },
@@ -485,8 +432,6 @@ class _StatusPageState extends State<StatusPage> {
                               service: service,
                               onTap: () => _showServiceDetails(context, service),
                               onReport: () => _showReportDialog(context, service),
-                              onRecheck: () => _recheckService(service.id),
-                              isChecking: _checkingServices.contains(service.id),
                             ),
                           );
                         },
@@ -1129,6 +1074,117 @@ class _StatusPageState extends State<StatusPage> {
                   ),
                 ),
               ],
+              // Component statuses if available
+              if (service.components.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Divider(color: Theme.of(context).colorScheme.outline.withOpacity(0.2)),
+                const SizedBox(height: 12),
+                Text(
+                  'Service Components',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                ...service.components.map((component) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Color(component.statusColor).withOpacity(0.3),
+                        width: 1,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                color: Color(component.statusColor),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              component.typeIcon,
+                              style: const TextStyle(fontSize: 16),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                component.name,
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Color(component.statusColor).withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                _getStatusText(component.status),
+                                style: TextStyle(
+                                  color: Color(component.statusColor),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        _buildDetailRow('URL', component.url),
+                        if (component.responseTimeMs > 0) ...[
+                          const SizedBox(height: 4),
+                          _buildDetailRow('Response Time', '${component.responseTimeMs}ms'),
+                        ],
+                        if (component.statusCode != null) ...[
+                          const SizedBox(height: 4),
+                          _buildDetailRow('Status Code', '${component.statusCode}'),
+                        ],
+                        if (component.errorMessage != null) ...[
+                          const SizedBox(height: 4),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.error_outline,
+                                  size: 14,
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    component.errorMessage!,
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: Theme.of(context).colorScheme.error,
+                                        ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                )),
+              ],
               const SizedBox(height: 12),
               // Service health summary
               Container(
@@ -1152,6 +1208,14 @@ class _StatusPageState extends State<StatusPage> {
                     _buildDetailRow('Has Issues', service.hasIssues ? 'Yes' : 'No'),
                     const SizedBox(height: 4),
                     _buildDetailRow('Status Code', service.status.name.toUpperCase()),
+                    if (service.components.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _buildDetailRow('Components', '${service.operationalComponentsCount}/${service.components.length} operational'),
+                      if (service.componentsWithIssuesCount > 0) ...[
+                        const SizedBox(height: 4),
+                        _buildDetailRow('Components with Issues', service.componentsWithIssuesCount.toString()),
+                      ],
+                    ],
                   ],
                 ),
               ),
