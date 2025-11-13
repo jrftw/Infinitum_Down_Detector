@@ -254,11 +254,32 @@ class _StatusPageState extends State<StatusPage> {
             ),
           ),
           
-          // Status Overview
+          // Status Overview - Infinitum Services
           SliverToBoxAdapter(
             child: Consumer<ServiceStatusProvider>(
               builder: (context, provider, _) {
-                return _buildStatusOverview(context, provider);
+                return _buildStatusOverview(
+                  context, 
+                  provider, 
+                  services: provider.infinitumServices,
+                  title: 'Infinitum Services Overview',
+                  icon: Icons.business,
+                );
+              },
+            ),
+          ),
+          
+          // Status Overview - Third-Party Services
+          SliverToBoxAdapter(
+            child: Consumer<ServiceStatusProvider>(
+              builder: (context, provider, _) {
+                return _buildStatusOverview(
+                  context, 
+                  provider, 
+                  services: provider.thirdPartyServices,
+                  title: 'Third-Party Services Overview',
+                  icon: Icons.cloud,
+                );
               },
             ),
           ),
@@ -587,23 +608,28 @@ class _StatusPageState extends State<StatusPage> {
   }
   
   // MARK: - Status Overview Widget
-  // Builds the overview section showing overall status statistics
-  Widget _buildStatusOverview(BuildContext context, ServiceStatusProvider provider) {
-    final allServices = provider.allServices;
-    final operational = allServices.where((s) => s.isOperational).length;
-    final degraded = allServices.where((s) => s.status == ServiceHealthStatus.degraded).length;
-    final partialOutage = allServices.where((s) => s.status == ServiceHealthStatus.partialOutage).length;
-    final majorOutage = allServices.where((s) => s.status == ServiceHealthStatus.majorOutage).length;
-    final down = allServices.where((s) => s.status == ServiceHealthStatus.down).length;
-    final maintenance = allServices.where((s) => s.status == ServiceHealthStatus.maintenance).length;
-    final unknown = allServices.where((s) => s.status == ServiceHealthStatus.unknown).length;
-    final total = allServices.length;
+  // Builds the overview section showing overall status statistics for a specific set of services
+  Widget _buildStatusOverview(
+    BuildContext context, 
+    ServiceStatusProvider provider, {
+    required List<ServiceStatus> services,
+    required String title,
+    required IconData icon,
+  }) {
+    final operational = services.where((s) => s.isOperational).length;
+    final degraded = services.where((s) => s.status == ServiceHealthStatus.degraded).length;
+    final partialOutage = services.where((s) => s.status == ServiceHealthStatus.partialOutage).length;
+    final majorOutage = services.where((s) => s.status == ServiceHealthStatus.majorOutage).length;
+    final down = services.where((s) => s.status == ServiceHealthStatus.down).length;
+    final maintenance = services.where((s) => s.status == ServiceHealthStatus.maintenance).length;
+    final unknown = services.where((s) => s.status == ServiceHealthStatus.unknown).length;
+    final total = services.length;
     
     // Calculate uptime percentage (operational / total)
     final uptimePercentage = total > 0 ? (operational / total * 100) : 0.0;
     
     // Calculate average response time
-    final servicesWithResponseTime = allServices.where((s) => s.responseTimeMs > 0).toList();
+    final servicesWithResponseTime = services.where((s) => s.responseTimeMs > 0).toList();
     final avgResponseTime = servicesWithResponseTime.isEmpty
         ? 0
         : (servicesWithResponseTime.map((s) => s.responseTimeMs).reduce((a, b) => a + b) /
@@ -646,15 +672,18 @@ class _StatusPageState extends State<StatusPage> {
           Row(
             children: [
               Icon(
-                Icons.dashboard,
+                icon,
                 color: Theme.of(context).colorScheme.primary,
               ),
               const SizedBox(width: 8),
-              Text(
-                'Status Overview',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),
@@ -670,7 +699,7 @@ class _StatusPageState extends State<StatusPage> {
                         context,
                         'Operational',
                         operational.toString(),
-                        allServices.length.toString(),
+                        total.toString(),
                         const Color(0xFF10B981),
                         Icons.check_circle,
                       ),
@@ -681,7 +710,7 @@ class _StatusPageState extends State<StatusPage> {
                         context,
                         'Issues',
                         (degraded + partialOutage + majorOutage + down).toString(),
-                        allServices.length.toString(),
+                        total.toString(),
                         const Color(0xFFF59E0B),
                         Icons.warning,
                       ),
@@ -696,7 +725,7 @@ class _StatusPageState extends State<StatusPage> {
                         context,
                         'Down',
                         down.toString(),
-                        allServices.length.toString(),
+                        total.toString(),
                         const Color(0xFFEF4444),
                         Icons.error,
                       ),
@@ -707,7 +736,7 @@ class _StatusPageState extends State<StatusPage> {
                         context,
                         'Other',
                         (maintenance + unknown).toString(),
-                        allServices.length.toString(),
+                        total.toString(),
                         const Color(0xFF6B7280),
                         Icons.help_outline,
                       ),
@@ -724,7 +753,7 @@ class _StatusPageState extends State<StatusPage> {
                     context,
                     'Operational',
                     operational.toString(),
-                    allServices.length.toString(),
+                    total.toString(),
                     const Color(0xFF10B981),
                     Icons.check_circle,
                   ),
@@ -735,7 +764,7 @@ class _StatusPageState extends State<StatusPage> {
                     context,
                     'Issues',
                     (degraded + partialOutage + majorOutage + down).toString(),
-                    allServices.length.toString(),
+                    total.toString(),
                     const Color(0xFFF59E0B),
                     Icons.warning,
                   ),
@@ -746,7 +775,7 @@ class _StatusPageState extends State<StatusPage> {
                     context,
                     'Down',
                     down.toString(),
-                    allServices.length.toString(),
+                    total.toString(),
                     const Color(0xFFEF4444),
                     Icons.error,
                   ),
@@ -757,7 +786,7 @@ class _StatusPageState extends State<StatusPage> {
                     context,
                     'Other',
                     (maintenance + unknown).toString(),
-                    allServices.length.toString(),
+                    total.toString(),
                     const Color(0xFF6B7280),
                     Icons.help_outline,
                   ),
@@ -802,7 +831,7 @@ class _StatusPageState extends State<StatusPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'System Uptime',
+                        'Uptime',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
