@@ -14,6 +14,7 @@ import '../models/service_component.dart';
 const bool ENABLE_DEBUG_LOGGING = true;
 
 /// Default health check interval in seconds
+/// Note: Server-side checks run every 2 minutes (120 seconds) to stay within free tier
 const int DEFAULT_HEALTH_CHECK_INTERVAL = 60;
 
 /// HTTP request timeout in seconds

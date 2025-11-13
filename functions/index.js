@@ -1405,15 +1405,15 @@ async function checkSingleService(service, previousStatus = null) {
 }
 
 // MARK: - Scheduled Health Check Function
-// Runs every 1 minute to check all services and update Firestore
+// Runs every 2 minutes to check all services and update Firestore
 // This ensures all users see the same status (server-side checks)
 // Optimized for Firebase free tier limits:
-// - 2M invocations/month (43,200/month at 1min interval = 2.16% usage)
-// - 400K GB-seconds/month (estimated ~22K/month = 5.5% usage)
-// - 200K CPU-seconds/month (estimated ~86K/month = 43% usage)
+// - 2M invocations/month (21,600/month at 2min interval = 1.08% usage)
+// - 400K GB-seconds/month (estimated ~38K/month = 9.5% usage)
+// - 200K CPU-seconds/month (estimated ~151K/month = 75.5% usage) - SAFE MARGIN
 exports.scheduledHealthCheck = functions
     .pubsub
-    .schedule("*/1 * * * *")  // Every 1 minute (cron format)
+    .schedule("*/2 * * * *")  // Every 2 minutes (cron format) - Optimized for free tier
     .timeZone("UTC")
     .onRun(async (context) => {
       const startExecutionTime = Date.now();
@@ -1517,8 +1517,8 @@ exports.scheduledHealthCheck = functions
         );
 
         // Log usage metrics for monitoring (stays within free tier)
-        // Estimated: ~43,200 invocations/month, ~22K GB-seconds/month,
-        // ~86K CPU-seconds/month
+        // Estimated: ~21,600 invocations/month, ~38K GB-seconds/month,
+        // ~151K CPU-seconds/month (75.5% of 200K limit - SAFE)
         return null;
       } catch (error) {
         console.error("Error in scheduled health check:", error);
