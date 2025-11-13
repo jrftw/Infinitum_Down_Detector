@@ -150,6 +150,11 @@ class ServiceStatusProvider with ChangeNotifier {
     }
   }
   
+  // MARK: - Cache Save (Currently Unused - Health checks are server-side)
+  // This method is kept for potential future use but is currently unused
+  // since health checks are performed server-side by Cloud Functions
+  // Uncomment and use if client-side caching is needed in the future
+  /*
   /// Saves service statuses to cache
   /// Returns void
   Future<void> _saveToCache() async {
@@ -162,6 +167,7 @@ class ServiceStatusProvider with ChangeNotifier {
       Logger.logError('Error saving to cache', 'service_status_provider.dart', '_saveToCache', e);
     }
   }
+  */
   
   // MARK: - Service Initialization
   // Creates initial service status objects for all monitored services
@@ -229,24 +235,28 @@ class ServiceStatusProvider with ChangeNotifier {
         name: 'Apple Services',
         url: 'https://www.apple.com/support/systemstatus/',
         type: ServiceType.thirdParty,
+        components: ServiceComponentDefinitions.getComponentsForService('apple'),
       ),
       ServiceStatus.initial(
         id: 'discord',
         name: 'Discord',
         url: 'https://discordstatus.com/',
         type: ServiceType.thirdParty,
+        components: ServiceComponentDefinitions.getComponentsForService('discord'),
       ),
       ServiceStatus.initial(
         id: 'tiktok',
         name: 'TikTok',
         url: 'https://www.tiktok.com/',
         type: ServiceType.thirdParty,
+        components: ServiceComponentDefinitions.getComponentsForService('tiktok'),
       ),
       ServiceStatus.initial(
         id: 'aws',
         name: 'AWS',
         url: 'https://status.aws.amazon.com/',
         type: ServiceType.thirdParty,
+        components: ServiceComponentDefinitions.getComponentsForService('aws'),
       ),
     ];
     

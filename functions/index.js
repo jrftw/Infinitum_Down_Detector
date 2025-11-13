@@ -258,12 +258,45 @@ function getComponentsForService(serviceId) {
       return [
         {id: "firebase-app-hosting", name: "App Hosting", url: "https://status.firebase.google.com/", type: "other"},
         {id: "firebase-authentication", name: "Authentication", url: "https://status.firebase.google.com/", type: "auth"},
+        {id: "firebase-cloud-firestore", name: "Cloud Firestore", url: "https://status.firebase.google.com/", type: "database"},
         {id: "firebase-cloud-messaging", name: "Cloud Messaging", url: "https://status.firebase.google.com/", type: "other"},
+        {id: "firebase-cloud-functions", name: "Cloud Functions", url: "https://status.firebase.google.com/", type: "api"},
         {id: "firebase-console", name: "Console", url: "https://status.firebase.google.com/", type: "other"},
         {id: "firebase-crashlytics", name: "Crashlytics", url: "https://status.firebase.google.com/", type: "other"},
         {id: "firebase-hosting", name: "Hosting", url: "https://status.firebase.google.com/", type: "cdn"},
         {id: "firebase-performance-monitoring", name: "Performance Monitoring", url: "https://status.firebase.google.com/", type: "other"},
         {id: "firebase-realtime-database", name: "Realtime Database", url: "https://status.firebase.google.com/", type: "database"},
+        {id: "firebase-storage", name: "Storage", url: "https://status.firebase.google.com/", type: "other"},
+      ];
+    case "aws":
+      return [
+        {id: "aws-ec2", name: "EC2", url: "https://status.aws.amazon.com/", type: "other"},
+        {id: "aws-s3", name: "S3", url: "https://status.aws.amazon.com/", type: "other"},
+        {id: "aws-cloudfront", name: "CloudFront", url: "https://status.aws.amazon.com/", type: "cdn"},
+        {id: "aws-api-gateway", name: "API Gateway", url: "https://status.aws.amazon.com/", type: "api"},
+        {id: "aws-rds", name: "RDS", url: "https://status.aws.amazon.com/", type: "database"},
+        {id: "aws-lambda", name: "Lambda", url: "https://status.aws.amazon.com/", type: "api"},
+      ];
+    case "apple":
+      return [
+        {id: "apple-app-store-connect", name: "App Store Connect", url: "https://www.apple.com/support/systemstatus/", type: "other"},
+        {id: "apple-apns", name: "Apple Push Notification Service", url: "https://www.apple.com/support/systemstatus/", type: "other"},
+        {id: "apple-sign-in", name: "Sign in with Apple", url: "https://www.apple.com/support/systemstatus/", type: "auth"},
+        {id: "apple-testflight", name: "TestFlight", url: "https://www.apple.com/support/systemstatus/", type: "other"},
+        {id: "apple-icloud", name: "iCloud", url: "https://www.apple.com/support/systemstatus/", type: "other"},
+      ];
+    case "discord":
+      return [
+        {id: "discord-api", name: "API", url: "https://discordstatus.com/", type: "api"},
+        {id: "discord-gateway", name: "Gateway", url: "https://discordstatus.com/", type: "other"},
+        {id: "discord-media-proxy", name: "Media Proxy", url: "https://discordstatus.com/", type: "cdn"},
+        {id: "discord-voice", name: "Voice", url: "https://discordstatus.com/", type: "other"},
+      ];
+    case "tiktok":
+      return [
+        {id: "tiktok-api", name: "API", url: "https://www.tiktok.com/", type: "api"},
+        {id: "tiktok-live", name: "LIVE", url: "https://www.tiktok.com/", type: "other"},
+        {id: "tiktok-cdn", name: "CDN", url: "https://www.tiktok.com/", type: "cdn"},
       ];
     default:
       return [];
@@ -629,12 +662,49 @@ async function parseComponentStatuses(serviceId, components, responseBody, httpS
       });
     }
   } else if (serviceId === "firebase") {
-    // Parse Firebase status page
-    // Firebase status page has similar structure
+    // Parse Firebase status page with functional checks for critical components
     for (const comp of components) {
       let compStatus = "unknown";
       let errorMessage = null;
+      let responseTimeMs = 0;
       
+      // MARK: - Firebase Auth Functional Check
+      // For Firebase Authentication, perform actual functional check, not just status page parsing
+      if (comp.id === "firebase-authentication") {
+        try {
+          // Perform functional check with triple-check validation
+          const authCheckResult = await tripleCheckValidation(
+            checkFirebaseAuthFunctional,
+            1000, // 1 second delay between checks
+          );
+          
+          compStatus = authCheckResult.status;
+          errorMessage = authCheckResult.errorMessage;
+          responseTimeMs = authCheckResult.responseTimeMs;
+          
+          // If functional check indicates operational, use that
+          // Otherwise, also check status page for additional context
+          if (compStatus === "operational") {
+            componentStatuses.push({
+              id: comp.id,
+              name: comp.name,
+              url: comp.url,
+              type: comp.type,
+              status: compStatus,
+              lastChecked: admin.firestore.Timestamp.now(),
+              responseTimeMs: responseTimeMs,
+              errorMessage: errorMessage,
+            });
+            continue; // Skip status page parsing for Auth
+          }
+          // If functional check failed, continue to status page parsing for additional info
+        } catch (e) {
+          console.warn(`Firebase Auth functional check failed: ${e.message}`);
+          // Continue to status page parsing as fallback
+        }
+      }
+      
+      // Parse status page for all components (including Auth if functional check failed)
       const compNameLower = comp.name.toLowerCase();
       const searchPatterns = [
         compNameLower,
@@ -654,28 +724,44 @@ async function parseComponentStatuses(serviceId, components, responseBody, httpS
             Math.min(responseBody.length, compIndex + 200),
           );
           
-          if (
-            surroundingText.includes("service disruption") ||
-            surroundingText.includes("outage") ||
-            surroundingText.includes("down") ||
-            surroundingText.includes("incident")
-          ) {
-            compStatus = "down";
-            errorMessage = "Service disruption reported";
-          } else if (
-            surroundingText.includes("degraded") ||
-            surroundingText.includes("partial") ||
-            surroundingText.includes("issue")
-          ) {
-            compStatus = "degraded";
-            errorMessage = "Service degradation reported";
-          } else if (
-            surroundingText.includes("operational") ||
-            surroundingText.includes("normal") ||
-            surroundingText.includes("available") ||
-            surroundingText.includes("healthy")
-          ) {
-            compStatus = "operational";
+          // Only override status if we haven't already determined it from functional check
+          if (compStatus === "unknown") {
+            if (
+              surroundingText.includes("service disruption") ||
+              surroundingText.includes("outage") ||
+              surroundingText.includes("down") ||
+              surroundingText.includes("incident")
+            ) {
+              compStatus = "down";
+              errorMessage = "Service disruption reported";
+            } else if (
+              surroundingText.includes("degraded") ||
+              surroundingText.includes("partial") ||
+              surroundingText.includes("issue")
+            ) {
+              compStatus = "degraded";
+              errorMessage = "Service degradation reported";
+            } else if (
+              surroundingText.includes("operational") ||
+              surroundingText.includes("normal") ||
+              surroundingText.includes("available") ||
+              surroundingText.includes("healthy")
+            ) {
+              compStatus = "operational";
+            }
+          } else {
+            // If we have a status from functional check but status page shows issues,
+            // combine the information (use worse status)
+            if (
+              surroundingText.includes("service disruption") ||
+              surroundingText.includes("outage") ||
+              surroundingText.includes("down")
+            ) {
+              if (compStatus !== "down") {
+                compStatus = "degraded";
+                errorMessage = errorMessage || "Service issue reported";
+              }
+            }
           }
         }
       }
@@ -691,8 +777,210 @@ async function parseComponentStatuses(serviceId, components, responseBody, httpS
         type: comp.type,
         status: compStatus,
         lastChecked: admin.firestore.Timestamp.now(),
+        responseTimeMs: responseTimeMs,
+        errorMessage: errorMessage,
+      });
+    }
+  } else if (serviceId === "aws") {
+    // Parse AWS status page
+    for (const comp of components) {
+      let compStatus = "unknown";
+      let errorMessage = null;
+      
+      const compNameLower = comp.name.toLowerCase();
+      const searchPatterns = [
+        compNameLower,
+        compNameLower.replace("aws ", ""),
+        compNameLower.replace("amazon ", ""),
+      ];
+      
+      // Search for component in response
+      let foundInPage = false;
+      for (const pattern of searchPatterns) {
+        if (responseBodyLower.includes(pattern)) {
+          foundInPage = true;
+          const compIndex = responseBodyLower.indexOf(pattern);
+          if (compIndex !== -1) {
+            const surroundingText = responseBodyLower.substring(
+              Math.max(0, compIndex - 300),
+              Math.min(responseBody.length, compIndex + 300),
+            );
+            
+            // Check for issues
+            if (
+              surroundingText.includes("service disruption") ||
+              surroundingText.includes("outage") ||
+              surroundingText.includes("down") ||
+              surroundingText.includes("incident") ||
+              surroundingText.includes("degraded")
+            ) {
+              compStatus = "degraded";
+              errorMessage = "Service issue reported";
+            } else if (
+              surroundingText.includes("operational") ||
+              surroundingText.includes("normal") ||
+              surroundingText.includes("available")
+            ) {
+              compStatus = "operational";
+            }
+          }
+          break;
+        }
+      }
+      
+      if (foundInPage && compStatus === "unknown") {
+        compStatus = "operational";
+      } else if (!foundInPage) {
+        compStatus = "unknown";
+      }
+      
+      componentStatuses.push({
+        id: comp.id,
+        name: comp.name,
+        url: comp.url,
+        type: comp.type,
+        status: compStatus,
+        lastChecked: admin.firestore.Timestamp.now(),
         responseTimeMs: 0,
         errorMessage: errorMessage,
+      });
+    }
+  } else if (serviceId === "apple") {
+    // Parse Apple status page
+    for (const comp of components) {
+      let compStatus = "unknown";
+      let errorMessage = null;
+      
+      const compNameLower = comp.name.toLowerCase();
+      const searchPatterns = [
+        compNameLower,
+        compNameLower.replace("apple ", ""),
+        compNameLower.replace("apns", "push notification"),
+      ];
+      
+      let foundInPage = false;
+      for (const pattern of searchPatterns) {
+        if (responseBodyLower.includes(pattern)) {
+          foundInPage = true;
+          const compIndex = responseBodyLower.indexOf(pattern);
+          if (compIndex !== -1) {
+            const surroundingText = responseBodyLower.substring(
+              Math.max(0, compIndex - 300),
+              Math.min(responseBody.length, compIndex + 300),
+            );
+            
+            if (
+              surroundingText.includes("outage") ||
+              surroundingText.includes("down") ||
+              surroundingText.includes("unavailable") ||
+              surroundingText.includes("issue")
+            ) {
+              compStatus = "degraded";
+              errorMessage = "Service issue reported";
+            } else if (
+              surroundingText.includes("operational") ||
+              surroundingText.includes("available") ||
+              surroundingText.includes("normal")
+            ) {
+              compStatus = "operational";
+            }
+          }
+          break;
+        }
+      }
+      
+      if (foundInPage && compStatus === "unknown") {
+        compStatus = "operational";
+      } else if (!foundInPage) {
+        compStatus = "unknown";
+      }
+      
+      componentStatuses.push({
+        id: comp.id,
+        name: comp.name,
+        url: comp.url,
+        type: comp.type,
+        status: compStatus,
+        lastChecked: admin.firestore.Timestamp.now(),
+        responseTimeMs: 0,
+        errorMessage: errorMessage,
+      });
+    }
+  } else if (serviceId === "discord") {
+    // Parse Discord status page
+    for (const comp of components) {
+      let compStatus = "unknown";
+      let errorMessage = null;
+      
+      const compNameLower = comp.name.toLowerCase();
+      const searchPatterns = [
+        compNameLower,
+        compNameLower.replace("discord ", ""),
+      ];
+      
+      let foundInPage = false;
+      for (const pattern of searchPatterns) {
+        if (responseBodyLower.includes(pattern)) {
+          foundInPage = true;
+          const compIndex = responseBodyLower.indexOf(pattern);
+          if (compIndex !== -1) {
+            const surroundingText = responseBodyLower.substring(
+              Math.max(0, compIndex - 300),
+              Math.min(responseBody.length, compIndex + 300),
+            );
+            
+            if (
+              surroundingText.includes("outage") ||
+              surroundingText.includes("down") ||
+              surroundingText.includes("degraded") ||
+              surroundingText.includes("incident")
+            ) {
+              compStatus = "degraded";
+              errorMessage = "Service issue reported";
+            } else if (
+              surroundingText.includes("operational") ||
+              surroundingText.includes("healthy") ||
+              surroundingText.includes("normal")
+            ) {
+              compStatus = "operational";
+            }
+          }
+          break;
+        }
+      }
+      
+      if (foundInPage && compStatus === "unknown") {
+        compStatus = "operational";
+      } else if (!foundInPage) {
+        compStatus = "unknown";
+      }
+      
+      componentStatuses.push({
+        id: comp.id,
+        name: comp.name,
+        url: comp.url,
+        type: comp.type,
+        status: compStatus,
+        lastChecked: admin.firestore.Timestamp.now(),
+        responseTimeMs: 0,
+        errorMessage: errorMessage,
+      });
+    }
+  } else if (serviceId === "tiktok") {
+    // Parse TikTok status (main page check)
+    // TikTok doesn't have a public status page, so we check main site availability
+    for (const comp of components) {
+      // For TikTok, if main page loads, assume components are operational
+      // This is a simplified check since TikTok doesn't provide detailed status
+      componentStatuses.push({
+        id: comp.id,
+        name: comp.name,
+        url: comp.url,
+        type: comp.type,
+        status: httpStatus >= 200 && httpStatus < 400 ? "operational" : "unknown",
+        lastChecked: admin.firestore.Timestamp.now(),
+        responseTimeMs: 0,
+        errorMessage: httpStatus >= 400 ? `HTTP ${httpStatus}` : null,
       });
     }
   } else {
@@ -712,9 +1000,149 @@ async function parseComponentStatuses(serviceId, components, responseBody, httpS
   return componentStatuses;
 }
 
+// MARK: - Triple-Check Validation Helper
+/**
+ * Performs triple-check validation for suspected outages
+ * Requires 3 consecutive failures before marking as down/degraded
+ * @param {Function} checkFunction - Function that performs a single check
+ * @param {number} delayMs - Delay between checks in milliseconds
+ * @return {Promise<Object>} Result of the checks
+ */
+async function tripleCheckValidation(checkFunction, delayMs = 2000) {
+  const results = [];
+  
+  // Perform first check
+  try {
+    const result1 = await checkFunction();
+    results.push(result1);
+    
+    // If first check passes, return immediately
+    if (result1.status === "operational" || result1.statusCode < 400) {
+      return result1;
+    }
+    
+    // First failure - wait and check again
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    const result2 = await checkFunction();
+    results.push(result2);
+    
+    // If second check passes, return as operational (false positive)
+    if (result2.status === "operational" || result2.statusCode < 400) {
+      return result2;
+    }
+    
+    // Second failure - wait and check third time
+    await new Promise((resolve) => setTimeout(resolve, delayMs * 2));
+    const result3 = await checkFunction();
+    results.push(result3);
+    
+    // If third check passes, return as operational (transient issue)
+    if (result3.status === "operational" || result3.statusCode < 400) {
+      return result3;
+    }
+    
+    // All three checks failed - return worst status
+    const worstStatus = results.reduce((worst, current) => {
+      const statusPriority = {
+        "down": 0,
+        "degraded": 1,
+        "operational": 2,
+        "unknown": 3,
+      };
+      return statusPriority[current.status] < statusPriority[worst.status] ? current : worst;
+    }, results[0]);
+    
+    return worstStatus;
+  } catch (error) {
+    // If any check throws, return error result
+    return {
+      status: "down",
+      errorMessage: error.message || "Unknown error",
+      statusCode: null,
+      responseTimeMs: 0,
+    };
+  }
+}
+
+// MARK: - Firebase Auth Functional Check
+/**
+ * Performs a functional check of Firebase Auth by attempting to verify a token
+ * This is a lightweight check that doesn't require actual authentication
+ * @return {Promise<Object>} Check result
+ */
+async function checkFirebaseAuthFunctional() {
+  const startTime = Date.now();
+  
+  try {
+    // Check Firebase Auth REST API endpoint (public endpoint for token verification)
+    // This endpoint is used for token verification and is a good indicator of Auth service health
+    const authCheckUrl = "https://www.googleapis.com/identitytoolkit/v3/relyingparty/getProjectConfig";
+    
+    // Make a lightweight request to Firebase Auth API
+    // This doesn't require authentication and will return project config if service is up
+    const response = await axios.get(authCheckUrl, {
+      timeout: 5000,
+      validateStatus: (status) => status < 500, // Accept any status < 500
+      params: {
+        key: "AIzaSyDummyKey", // Dummy key - we're just checking if the endpoint responds
+      },
+    });
+    
+    const endTime = Date.now();
+    const responseTime = endTime - startTime;
+    
+    // If we get a response (even 400/403), Auth service is operational
+    // 400/403 means the service is up but our request is invalid (expected)
+    // 5xx means the service is down
+    if (response.status < 500) {
+      return {
+        status: "operational",
+        statusCode: response.status,
+        responseTimeMs: responseTime,
+        errorMessage: null,
+      };
+    } else {
+      return {
+        status: "down",
+        statusCode: response.status,
+        responseTimeMs: responseTime,
+        errorMessage: `HTTP ${response.status}`,
+      };
+    }
+  } catch (error) {
+    const endTime = Date.now();
+    const responseTime = endTime - startTime;
+    
+    // Network errors or timeouts indicate service issues
+    if (error.code === "ECONNABORTED" || error.message.includes("timeout")) {
+      return {
+        status: "down",
+        statusCode: null,
+        responseTimeMs: responseTime,
+        errorMessage: "Connection timeout",
+      };
+    } else if (error.response && error.response.status >= 500) {
+      return {
+        status: "down",
+        statusCode: error.response.status,
+        responseTimeMs: responseTime,
+        errorMessage: `HTTP ${error.response.status}`,
+      };
+    } else {
+      // Other errors (like 400/403) mean service is up
+      return {
+        status: "operational",
+        statusCode: error.response?.status || null,
+        responseTimeMs: responseTime,
+        errorMessage: null,
+      };
+    }
+  }
+}
+
 // MARK: - Helper Function: Check Single Service
 /**
- * Performs health check on a single service
+ * Performs health check on a single service with triple-check validation
  * @param {Object} service - Service object with id, name, url
  * @param {Object|null} previousStatus - Previous service status from Firestore
  * @return {Promise<Object>} Service status object

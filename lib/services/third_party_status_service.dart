@@ -194,7 +194,7 @@ class ThirdPartyStatusService {
               startTime: startTime,
             );
           }
-        } on DioException catch (e) {
+        } on DioException {
           Logger.logDebug('Primary CORS proxy failed for $name, trying fallback', 
               'third_party_status_service.dart', '_checkThirdPartyService');
         }
@@ -222,7 +222,7 @@ class ThirdPartyStatusService {
                 startTime: startTime,
               );
             }
-          } on DioException catch (e) {
+          } on DioException {
             Logger.logDebug('Fallback CORS proxy failed for $name, trying direct request', 
                 'third_party_status_service.dart', '_checkThirdPartyService');
           }

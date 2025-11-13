@@ -190,7 +190,7 @@ class HealthCheckService {
             );
             return _combineServiceAndComponentStatus(mainResult, updatedComponents);
           }
-        } on DioException catch (e) {
+        } on DioException {
           Logger.logDebug('Primary CORS proxy failed for ${serviceStatus.name}, trying fallback', 
               'health_check_service.dart', 'checkServiceHealth');
         }
@@ -218,7 +218,7 @@ class HealthCheckService {
               );
               return _combineServiceAndComponentStatus(mainResult, updatedComponents);
             }
-          } on DioException catch (e) {
+          } on DioException {
             Logger.logDebug('Fallback CORS proxy failed for ${serviceStatus.name}, trying direct request', 
                 'health_check_service.dart', 'checkServiceHealth');
           }
@@ -450,7 +450,7 @@ class HealthCheckService {
             proxySuccess = true;
             return _processComponentResponse(component: component, response: proxyResponse, startTime: startTime);
           }
-        } on DioException catch (e) {
+        } on DioException {
           Logger.logDebug('Primary CORS proxy failed for ${component.name}, trying fallback', 
               'health_check_service.dart', 'checkComponentHealth');
         }
@@ -472,7 +472,7 @@ class HealthCheckService {
               proxySuccess = true;
               return _processComponentResponse(component: component, response: proxyResponse, startTime: startTime);
             }
-          } on DioException catch (e) {
+          } on DioException {
             Logger.logDebug('Fallback CORS proxy failed for ${component.name}, trying direct request', 
                 'health_check_service.dart', 'checkComponentHealth');
           }

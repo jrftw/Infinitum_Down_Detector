@@ -209,10 +209,22 @@ class ServiceComponentDefinitions {
             type: ComponentType.auth,
           ),
           ServiceComponent.initial(
+            id: 'firebase-cloud-firestore',
+            name: 'Cloud Firestore',
+            url: 'https://status.firebase.google.com/',
+            type: ComponentType.database,
+          ),
+          ServiceComponent.initial(
             id: 'firebase-cloud-messaging',
             name: 'Cloud Messaging',
             url: 'https://status.firebase.google.com/',
             type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'firebase-cloud-functions',
+            name: 'Cloud Functions',
+            url: 'https://status.firebase.google.com/',
+            type: ComponentType.api,
           ),
           ServiceComponent.initial(
             id: 'firebase-console',
@@ -243,6 +255,136 @@ class ServiceComponentDefinitions {
             name: 'Realtime Database',
             url: 'https://status.firebase.google.com/',
             type: ComponentType.database,
+          ),
+          ServiceComponent.initial(
+            id: 'firebase-storage',
+            name: 'Storage',
+            url: 'https://status.firebase.google.com/',
+            type: ComponentType.other,
+          ),
+        ];
+      
+      case 'aws':
+        return [
+          ServiceComponent.initial(
+            id: 'aws-ec2',
+            name: 'EC2',
+            url: 'https://status.aws.amazon.com/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'aws-s3',
+            name: 'S3',
+            url: 'https://status.aws.amazon.com/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'aws-cloudfront',
+            name: 'CloudFront',
+            url: 'https://status.aws.amazon.com/',
+            type: ComponentType.cdn,
+          ),
+          ServiceComponent.initial(
+            id: 'aws-api-gateway',
+            name: 'API Gateway',
+            url: 'https://status.aws.amazon.com/',
+            type: ComponentType.api,
+          ),
+          ServiceComponent.initial(
+            id: 'aws-rds',
+            name: 'RDS',
+            url: 'https://status.aws.amazon.com/',
+            type: ComponentType.database,
+          ),
+          ServiceComponent.initial(
+            id: 'aws-lambda',
+            name: 'Lambda',
+            url: 'https://status.aws.amazon.com/',
+            type: ComponentType.api,
+          ),
+        ];
+      
+      case 'apple':
+        return [
+          ServiceComponent.initial(
+            id: 'apple-app-store-connect',
+            name: 'App Store Connect',
+            url: 'https://www.apple.com/support/systemstatus/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'apple-apns',
+            name: 'Apple Push Notification Service',
+            url: 'https://www.apple.com/support/systemstatus/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'apple-sign-in',
+            name: 'Sign in with Apple',
+            url: 'https://www.apple.com/support/systemstatus/',
+            type: ComponentType.auth,
+          ),
+          ServiceComponent.initial(
+            id: 'apple-testflight',
+            name: 'TestFlight',
+            url: 'https://www.apple.com/support/systemstatus/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'apple-icloud',
+            name: 'iCloud',
+            url: 'https://www.apple.com/support/systemstatus/',
+            type: ComponentType.other,
+          ),
+        ];
+      
+      case 'discord':
+        return [
+          ServiceComponent.initial(
+            id: 'discord-api',
+            name: 'API',
+            url: 'https://discordstatus.com/',
+            type: ComponentType.api,
+          ),
+          ServiceComponent.initial(
+            id: 'discord-gateway',
+            name: 'Gateway',
+            url: 'https://discordstatus.com/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'discord-media-proxy',
+            name: 'Media Proxy',
+            url: 'https://discordstatus.com/',
+            type: ComponentType.cdn,
+          ),
+          ServiceComponent.initial(
+            id: 'discord-voice',
+            name: 'Voice',
+            url: 'https://discordstatus.com/',
+            type: ComponentType.other,
+          ),
+        ];
+      
+      case 'tiktok':
+        return [
+          ServiceComponent.initial(
+            id: 'tiktok-api',
+            name: 'API',
+            url: 'https://www.tiktok.com/',
+            type: ComponentType.api,
+          ),
+          ServiceComponent.initial(
+            id: 'tiktok-live',
+            name: 'LIVE',
+            url: 'https://www.tiktok.com/',
+            type: ComponentType.other,
+          ),
+          ServiceComponent.initial(
+            id: 'tiktok-cdn',
+            name: 'CDN',
+            url: 'https://www.tiktok.com/',
+            type: ComponentType.cdn,
           ),
         ];
       
