@@ -269,21 +269,6 @@ class _StatusPageState extends State<StatusPage> {
             ),
           ),
           
-          // Status Overview - Third-Party Services
-          SliverToBoxAdapter(
-            child: Consumer<ServiceStatusProvider>(
-              builder: (context, provider, _) {
-                return _buildStatusOverview(
-                  context, 
-                  provider, 
-                  services: provider.thirdPartyServices,
-                  title: 'Third-Party Services Overview',
-                  icon: Icons.cloud,
-                );
-              },
-            ),
-          ),
-          
           // Infinitum Services Section
           Consumer<ServiceStatusProvider>(
             builder: (context, provider, _) {
@@ -374,6 +359,21 @@ class _StatusPageState extends State<StatusPage> {
                 ],
               );
             },
+          ),
+          
+          // Status Overview - Third-Party Services
+          SliverToBoxAdapter(
+            child: Consumer<ServiceStatusProvider>(
+              builder: (context, provider, _) {
+                return _buildStatusOverview(
+                  context, 
+                  provider, 
+                  services: provider.thirdPartyServices,
+                  title: 'Third-Party Services Overview',
+                  icon: Icons.cloud,
+                );
+              },
+            ),
           ),
           
           // Third-Party Services Section
