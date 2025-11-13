@@ -20,7 +20,7 @@ service cloud.firestore {
       // Allow anyone to write service status (any user can update status after health check)
       // No authentication required - enables real-time status sharing
       // Validate required fields exist and are correct types
-      // Optional fields (lastUpTime, errorMessage, components) can be null
+      // Optional fields (lastUpTime, errorMessage, components, statusCode) can be null
       allow create, update: if request.resource.data.keys().hasAll(['id', 'name', 'url', 'type', 'status', 'lastChecked', 'responseTimeMs', 'consecutiveFailures'])
                            && request.resource.data.id is string
                            && request.resource.data.name is string
@@ -32,6 +32,7 @@ service cloud.firestore {
                            && request.resource.data.consecutiveFailures is int
                            && (request.resource.data.lastUpTime == null || request.resource.data.lastUpTime is timestamp)
                            && (request.resource.data.errorMessage == null || request.resource.data.errorMessage is string)
+                           && (request.resource.data.statusCode == null || request.resource.data.statusCode is int)
                            && (request.resource.data.components == null || request.resource.data.components is list);
       
       // Allow delete only for cleanup (optional)
@@ -68,6 +69,28 @@ service cloud.firestore {
       
       // No updates or deletes allowed (reports are immutable)
       allow update, delete: if false;
+    }
+    
+    // MARK: - Service Status History Collection
+    // Public read access for historical status data
+    match /service_status_history/{serviceId}/entries/{entryId} {
+      // Allow anyone to read history (public status history)
+      allow read: if true;
+      
+      // Only allow writes from server (Cloud Functions)
+      // In production, you may want to restrict this further
+      allow write: if false; // Cloud Functions use admin SDK, bypassing rules
+    }
+    
+    // MARK: - Incidents Collection
+    // Public read access for incidents, restricted write access
+    match /incidents/{incidentId} {
+      // Allow anyone to read incidents (public incident information)
+      allow read: if true;
+      
+      // Allow authenticated users to create/update incidents
+      // For now, restrict writes - Cloud Functions can create via admin SDK
+      allow write: if false; // Cloud Functions use admin SDK, bypassing rules
     }
     
     // MARK: - Default Deny

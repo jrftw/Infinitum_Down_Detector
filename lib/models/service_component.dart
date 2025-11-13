@@ -90,8 +90,14 @@ class ServiceComponent {
         return 0xFF10B981; // Green
       case ServiceHealthStatus.degraded:
         return 0xFFF59E0B; // Amber
+      case ServiceHealthStatus.partialOutage:
+        return 0xFFF97316; // Orange
+      case ServiceHealthStatus.majorOutage:
+        return 0xFFDC2626; // Dark Red
       case ServiceHealthStatus.down:
         return 0xFFEF4444; // Red
+      case ServiceHealthStatus.maintenance:
+        return 0xFF6366F1; // Indigo
       case ServiceHealthStatus.unknown:
         return 0xFF6B7280; // Gray
     }

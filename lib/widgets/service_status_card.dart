@@ -8,7 +8,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/service_status.dart';
-import '../models/service_component.dart';
 import '../core/config.dart';
 import '../core/responsive.dart';
 
@@ -18,12 +17,14 @@ class ServiceStatusCard extends StatelessWidget {
   final ServiceStatus service;
   final VoidCallback? onTap;
   final VoidCallback? onReport;
+  final VoidCallback? onHistory;
 
   const ServiceStatusCard({
     super.key,
     required this.service,
     this.onTap,
     this.onReport,
+    this.onHistory,
   });
 
   // MARK: - UI Build Methods
@@ -225,6 +226,14 @@ class ServiceStatusCard extends StatelessWidget {
                                 spacing: 8,
                                 runSpacing: 8,
                                 children: [
+                                  if (onHistory != null)
+                                    _buildActionButton(
+                                      context,
+                                      icon: Icon(Icons.history, size: 16, color: Theme.of(context).colorScheme.primary),
+                                      label: 'History',
+                                      onPressed: onHistory,
+                                      color: Theme.of(context).colorScheme.primary,
+                                    ),
                                   if (onReport != null)
                                     _buildActionButton(
                                       context,
@@ -269,7 +278,16 @@ class ServiceStatusCard extends StatelessWidget {
                               ),
                               const Spacer(),
                               // Action buttons
-                              if (onReport != null)
+                              if (onHistory != null)
+                                _buildActionButton(
+                                  context,
+                                  icon: Icon(Icons.history, size: 16, color: Theme.of(context).colorScheme.primary),
+                                  label: 'History',
+                                  onPressed: onHistory,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                              if (onReport != null) ...[
+                                const SizedBox(width: 8),
                                 _buildActionButton(
                                   context,
                                   icon: Icon(Icons.report_problem, size: 16, color: Theme.of(context).colorScheme.error),
@@ -277,6 +295,7 @@ class ServiceStatusCard extends StatelessWidget {
                                   onPressed: onReport,
                                   color: Theme.of(context).colorScheme.error,
                                 ),
+                              ],
                             ],
                           ),
                   );
@@ -425,8 +444,14 @@ class ServiceStatusCard extends StatelessWidget {
         return 'Operational';
       case ServiceHealthStatus.degraded:
         return 'Degraded';
+      case ServiceHealthStatus.partialOutage:
+        return 'Partial Outage';
+      case ServiceHealthStatus.majorOutage:
+        return 'Major Outage';
       case ServiceHealthStatus.down:
         return 'Down';
+      case ServiceHealthStatus.maintenance:
+        return 'Maintenance';
       case ServiceHealthStatus.unknown:
         return 'Unknown';
     }
@@ -439,8 +464,14 @@ class ServiceStatusCard extends StatelessWidget {
         return Icons.check_circle;
       case ServiceHealthStatus.degraded:
         return Icons.warning;
+      case ServiceHealthStatus.partialOutage:
+        return Icons.warning_amber_rounded;
+      case ServiceHealthStatus.majorOutage:
+        return Icons.error_outline;
       case ServiceHealthStatus.down:
         return Icons.error;
+      case ServiceHealthStatus.maintenance:
+        return Icons.build;
       case ServiceHealthStatus.unknown:
         return Icons.help_outline;
     }

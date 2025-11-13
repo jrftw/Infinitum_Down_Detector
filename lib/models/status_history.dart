@@ -126,11 +126,26 @@ class StatusStatistics {
             outageStart = entry.timestamp;
           }
           break;
+        case ServiceHealthStatus.partialOutage:
+          degraded++; // Count partial outages as degraded for statistics
+          if (outageStart == null) {
+            outageStart = entry.timestamp;
+          }
+          break;
+        case ServiceHealthStatus.majorOutage:
+          down++; // Count major outages as down for statistics
+          if (outageStart == null) {
+            outageStart = entry.timestamp;
+          }
+          break;
         case ServiceHealthStatus.down:
           down++;
           if (outageStart == null) {
             outageStart = entry.timestamp;
           }
+          break;
+        case ServiceHealthStatus.maintenance:
+          unknown++; // Count maintenance as unknown for statistics
           break;
         case ServiceHealthStatus.unknown:
           unknown++;

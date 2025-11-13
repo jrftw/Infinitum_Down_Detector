@@ -391,8 +391,16 @@ class StatusCacheService {
         return ServiceHealthStatus.operational;
       case 'degraded':
         return ServiceHealthStatus.degraded;
+      case 'partialoutage':
+      case 'partial_outage':
+        return ServiceHealthStatus.partialOutage;
+      case 'majoroutage':
+      case 'major_outage':
+        return ServiceHealthStatus.majorOutage;
       case 'down':
         return ServiceHealthStatus.down;
+      case 'maintenance':
+        return ServiceHealthStatus.maintenance;
       case 'unknown':
       default:
         return ServiceHealthStatus.unknown;

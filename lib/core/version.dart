@@ -9,7 +9,7 @@
 // Centralized version and build information
 
 /// Application version
-const String APP_VERSION = '1.0.0';
+const String APP_VERSION = '1.0.1';
 
 /// Build number
 const int BUILD_NUMBER = 1;

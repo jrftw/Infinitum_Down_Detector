@@ -1,7 +1,7 @@
 name: infinitum_down_detector
 description: Monitor the status of Infinitum services and third-party dependencies in real-time. Get instant alerts when services go down or experience issues.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.1+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

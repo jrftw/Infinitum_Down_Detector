@@ -16,6 +16,7 @@ import '../widgets/service_status_card.dart';
 import '../widgets/report_dialog.dart';
 import '../core/responsive.dart';
 import 'changelog_screen.dart';
+import 'history_screen.dart';
 
 // MARK: - Status Page
 // Main page displaying all service statuses with detailed information
@@ -341,6 +342,7 @@ class _StatusPageState extends State<StatusPage> {
                               service: service,
                               onTap: () => _showServiceDetails(context, service),
                               onReport: () => _showReportDialog(context, service),
+                              onHistory: () => _showHistory(context, service),
                             ),
                           );
                         },
@@ -432,6 +434,7 @@ class _StatusPageState extends State<StatusPage> {
                               service: service,
                               onTap: () => _showServiceDetails(context, service),
                               onReport: () => _showReportDialog(context, service),
+                              onHistory: () => _showHistory(context, service),
                             ),
                           );
                         },
@@ -551,12 +554,15 @@ class _StatusPageState extends State<StatusPage> {
     filtered.sort((a, b) {
       switch (_sortBy) {
         case 'status':
-          // Sort by status priority: down > degraded > unknown > operational
+          // Sort by status priority: down > majorOutage > partialOutage > degraded > maintenance > unknown > operational
           final statusPriority = {
             ServiceHealthStatus.down: 0,
-            ServiceHealthStatus.degraded: 1,
-            ServiceHealthStatus.unknown: 2,
-            ServiceHealthStatus.operational: 3,
+            ServiceHealthStatus.majorOutage: 1,
+            ServiceHealthStatus.partialOutage: 2,
+            ServiceHealthStatus.degraded: 3,
+            ServiceHealthStatus.maintenance: 4,
+            ServiceHealthStatus.unknown: 5,
+            ServiceHealthStatus.operational: 6,
           };
           final aPriority = statusPriority[a.status] ?? 3;
           final bPriority = statusPriority[b.status] ?? 3;
@@ -586,7 +592,10 @@ class _StatusPageState extends State<StatusPage> {
     final allServices = provider.allServices;
     final operational = allServices.where((s) => s.isOperational).length;
     final degraded = allServices.where((s) => s.status == ServiceHealthStatus.degraded).length;
+    final partialOutage = allServices.where((s) => s.status == ServiceHealthStatus.partialOutage).length;
+    final majorOutage = allServices.where((s) => s.status == ServiceHealthStatus.majorOutage).length;
     final down = allServices.where((s) => s.status == ServiceHealthStatus.down).length;
+    final maintenance = allServices.where((s) => s.status == ServiceHealthStatus.maintenance).length;
     final unknown = allServices.where((s) => s.status == ServiceHealthStatus.unknown).length;
     final total = allServices.length;
     
@@ -670,8 +679,8 @@ class _StatusPageState extends State<StatusPage> {
                     Expanded(
                       child: _buildStatCard(
                         context,
-                        'Degraded',
-                        degraded.toString(),
+                        'Issues',
+                        (degraded + partialOutage + majorOutage + down).toString(),
                         allServices.length.toString(),
                         const Color(0xFFF59E0B),
                         Icons.warning,
@@ -696,8 +705,8 @@ class _StatusPageState extends State<StatusPage> {
                     Expanded(
                       child: _buildStatCard(
                         context,
-                        'Unknown',
-                        unknown.toString(),
+                        'Other',
+                        (maintenance + unknown).toString(),
                         allServices.length.toString(),
                         const Color(0xFF6B7280),
                         Icons.help_outline,
@@ -724,8 +733,8 @@ class _StatusPageState extends State<StatusPage> {
                 Expanded(
                   child: _buildStatCard(
                     context,
-                    'Degraded',
-                    degraded.toString(),
+                    'Issues',
+                    (degraded + partialOutage + majorOutage + down).toString(),
                     allServices.length.toString(),
                     const Color(0xFFF59E0B),
                     Icons.warning,
@@ -746,8 +755,8 @@ class _StatusPageState extends State<StatusPage> {
                 Expanded(
                   child: _buildStatCard(
                     context,
-                    'Unknown',
-                    unknown.toString(),
+                    'Other',
+                    (maintenance + unknown).toString(),
                     allServices.length.toString(),
                     const Color(0xFF6B7280),
                     Icons.help_outline,
@@ -1318,8 +1327,14 @@ class _StatusPageState extends State<StatusPage> {
         return 'Operational';
       case ServiceHealthStatus.degraded:
         return 'Degraded';
+      case ServiceHealthStatus.partialOutage:
+        return 'Partial Outage';
+      case ServiceHealthStatus.majorOutage:
+        return 'Major Outage';
       case ServiceHealthStatus.down:
         return 'Down';
+      case ServiceHealthStatus.maintenance:
+        return 'Maintenance';
       case ServiceHealthStatus.unknown:
         return 'Unknown';
     }
@@ -1337,6 +1352,16 @@ class _StatusPageState extends State<StatusPage> {
       builder: (context) => ReportDialog(
         service: service,
         allServices: allServices ?? [],
+      ),
+    );
+  }
+
+  // MARK: - History Navigation
+  // Navigates to history screen for a service
+  void _showHistory(BuildContext context, ServiceStatus service) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => HistoryScreen(service: service),
       ),
     );
   }

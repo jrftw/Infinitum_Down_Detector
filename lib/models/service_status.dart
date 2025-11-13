@@ -91,7 +91,10 @@ class ServiceStatus {
   bool get isOperational => status == ServiceHealthStatus.operational;
   
   // Checks if the service is experiencing issues
-  bool get hasIssues => status == ServiceHealthStatus.degraded || status == ServiceHealthStatus.down;
+  bool get hasIssues => status == ServiceHealthStatus.degraded || 
+                       status == ServiceHealthStatus.partialOutage ||
+                       status == ServiceHealthStatus.majorOutage ||
+                       status == ServiceHealthStatus.down;
   
   // Gets the status color for UI display
   int get statusColor {
@@ -100,8 +103,14 @@ class ServiceStatus {
         return 0xFF10B981; // Green
       case ServiceHealthStatus.degraded:
         return 0xFFF59E0B; // Amber
+      case ServiceHealthStatus.partialOutage:
+        return 0xFFF97316; // Orange
+      case ServiceHealthStatus.majorOutage:
+        return 0xFFDC2626; // Dark Red
       case ServiceHealthStatus.down:
         return 0xFFEF4444; // Red
+      case ServiceHealthStatus.maintenance:
+        return 0xFF6366F1; // Indigo
       case ServiceHealthStatus.unknown:
         return 0xFF6B7280; // Gray
     }
@@ -148,7 +157,10 @@ class ServiceStatus {
 enum ServiceHealthStatus {
   operational,
   degraded,
+  partialOutage,
+  majorOutage,
   down,
+  maintenance,
   unknown,
 }
 

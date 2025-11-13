@@ -1045,6 +1045,36 @@ exports.scheduledHealthCheck = functions
 
         await batch.commit();
 
+        // MARK: - Save History Entries
+        // Store history entries for each service
+        const historyBatch = db.batch();
+        const historyCollectionName = "service_status_history";
+        const now = admin.firestore.Timestamp.now();
+
+        for (const result of results) {
+          const historyDocRef = db.collection(historyCollectionName)
+              .doc(result.id)
+              .collection("entries")
+              .doc(now.toMillis().toString());
+
+          historyBatch.set(historyDocRef, {
+            timestamp: now,
+            status: result.status,
+            responseTimeMs: result.responseTimeMs || 0,
+            errorMessage: result.errorMessage || null,
+            hasDataFeedIssue: result.hasDataFeedIssue || false,
+          });
+        }
+
+        // Commit history batch (don't fail if this fails)
+        try {
+          await historyBatch.commit();
+          console.log(`Saved ${results.length} history entries`);
+        } catch (historyError) {
+          console.warn("Error saving history entries:", historyError.message);
+          // Continue even if history save fails
+        }
+
         const operationalCount = results.filter((r) =>
           r.status === "operational",
         ).length;

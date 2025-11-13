@@ -14,7 +14,6 @@ import '../services/third_party_status_service.dart';
 import '../services/status_cache_service.dart';
 import '../core/config.dart';
 import '../core/logger.dart';
-import '../models/service_component.dart';
 
 // MARK: - Service Status Provider
 // Manages the state of all monitored services and coordinates health checks

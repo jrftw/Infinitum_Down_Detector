@@ -25,6 +25,24 @@ class ChangelogData {
   static List<ChangelogEntry> getEntries() {
     return [
       ChangelogEntry(
+        version: '1.0.1',
+        build: '1',
+        changes: [
+          'Added historical status tracking with Firestore storage',
+          'Implemented status history graphs with uptime and response time charts',
+          'Added new status states: Partial Outage, Major Outage, and Maintenance',
+          'Created history screen with interactive charts using fl_chart',
+          'Enhanced status overview with improved statistics',
+          'Added history navigation from service cards',
+          'Implemented status history service for data management',
+          'Updated Cloud Functions to automatically store history entries',
+          'Added incident model for future incident management',
+          'Improved UI responsiveness across all screen sizes',
+          'Enhanced status parsing to support new status types',
+          'Updated Firestore security rules for history and incidents collections',
+        ],
+      ),
+      ChangelogEntry(
         version: '1.0.0',
         build: '1',
         changes: [
